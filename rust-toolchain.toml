@@ -1,0 +1,7 @@
+# The nightly that Myrmic 0.7.0 pins for cell builds (`myrmic new` writes the
+# same channel into every scaffolded cell). One file at the workspace root
+# covers every crate; see docs/decisions/0002-toolchain-and-workspace.md.
+[toolchain]
+channel = "nightly-2026-08-07"
+components = ["rust-src", "rustfmt", "clippy"]
+targets = ["wasm32-unknown-unknown"]

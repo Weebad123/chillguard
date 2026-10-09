@@ -1,0 +1,13 @@
+# Example Myrmic runtime configuration for a single-node ChillGuard dev setup.
+# Start with:  myrmic runtimes start config/runtime.dev.yml --name chillguard-dev
+# Key reference: https://book.myrmic.dev/docs/reference/configuration/runtime-configuration
+
+execution:
+  # Capability tags this runtime advertises; cells deployed with a matching
+  # --tag are placed only on runtimes that carry it.
+  tags: [site-a]
+
+telemetry:
+  logs:
+    format: COMPACT
+    env_filter: "info"

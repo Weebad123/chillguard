@@ -1,0 +1,12 @@
+[package]
+name = "chillguard-core"
+description = "ChillGuard domain logic: pure, no Myrmic dependency, no I/O, no system clock."
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+thiserror = { workspace = true }
+
+[lints]
+workspace = true

@@ -1,0 +1,13 @@
+[package]
+name = "chillguard-protocol"
+description = "Message, event, and command types shared by the ChillGuard cells, with their wire encoding."
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+myrmic-sdk = { workspace = true }
+serde = { workspace = true }
+
+[lints]
+workspace = true

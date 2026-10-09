@@ -1,0 +1,17 @@
+[package]
+name = "fridge-asset-cell"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[package.metadata.myrmic]
+heap_size = 32_768
+
+[dependencies]
+chillguard-core = { workspace = true }
+chillguard-protocol = { workspace = true }
+myrmic-sdk = { workspace = true }
+serde = { workspace = true }
+
+[lints]
+workspace = true

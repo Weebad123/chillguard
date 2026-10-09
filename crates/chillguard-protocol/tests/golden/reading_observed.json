@@ -1,0 +1,11 @@
+{
+  "v": 1,
+  "body": {
+    "reading": {
+      "refrigerator_id": "fridge-1",
+      "temperature_c": 9.0,
+      "observed_at": 1791555600000,
+      "source": "simulated"
+    }
+  }
+}

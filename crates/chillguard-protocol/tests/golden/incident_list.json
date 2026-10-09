@@ -1,0 +1,36 @@
+{
+  "v": 1,
+  "body": {
+    "refrigerator_id": "fridge-1",
+    "incidents": [
+      {
+        "incident_id": "fridge-1-1791555600000",
+        "refrigerator_id": "fridge-1",
+        "started_at": 1791555600000,
+        "initial_temperature_c": 9.0,
+        "highest_temperature_c": 12.5,
+        "lowest_temperature_c": 9.0,
+        "severity": "warning",
+        "exposure": 600000,
+        "has_data_gap": true,
+        "recovered_at": null,
+        "recovery_temperature_c": null
+      },
+      {
+        "incident_id": "fridge-1-1791555600000",
+        "refrigerator_id": "fridge-1",
+        "started_at": 1791555600000,
+        "initial_temperature_c": 9.0,
+        "highest_temperature_c": 12.5,
+        "lowest_temperature_c": 9.0,
+        "severity": "critical",
+        "exposure": 1800000,
+        "has_data_gap": true,
+        "recovered_at": 1791558300000,
+        "recovery_temperature_c": 6.0
+      }
+    ],
+    "truncated": true,
+    "as_of": 1791558600000
+  }
+}

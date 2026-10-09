@@ -6,7 +6,21 @@ edition.workspace = true
 publish.workspace = true
 
 [dependencies]
+# `core` has no `exp`. libm is pure Rust and `no_std`; without its `arch`
+# feature it is software only, so the simulator computes the same values on
+# the host and in a Wasm cell.
+libm = { version = "0.2", default-features = false }
+serde = { workspace = true }
 thiserror = { workspace = true }
+
+# Host-only test dependencies; they may use `std`. They are never part of a
+# cell build.
+[dev-dependencies]
+# Postcard is the default codec of the SDK's `State`, JSON is the wire codec;
+# the restart scenario round-trips the monitor state through both.
+postcard = { version = "1", default-features = false, features = ["alloc"] }
+proptest = { version = "1", default-features = false, features = ["std"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
 
 [lints]
 workspace = true

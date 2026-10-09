@@ -1,0 +1,9 @@
+{
+  "v": 1,
+  "body": {
+    "refrigerator_id": "fridge-1",
+    "from": "normal",
+    "to": "warning",
+    "at": 1791555600000
+  }
+}

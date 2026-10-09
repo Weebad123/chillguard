@@ -1,0 +1,33 @@
+{
+  "v": 1,
+  "body": {
+    "refrigerator_id": "fridge-1",
+    "status": "critical",
+    "last_reading": {
+      "temperature_c": 11.0,
+      "observed_at": 1791557400000
+    },
+    "open_incident": {
+      "incident_id": "fridge-1-1791555600000",
+      "refrigerator_id": "fridge-1",
+      "started_at": 1791555600000,
+      "initial_temperature_c": 9.0,
+      "highest_temperature_c": 12.5,
+      "lowest_temperature_c": 9.0,
+      "severity": "critical",
+      "exposure": 1800000,
+      "has_data_gap": true,
+      "recovered_at": null,
+      "recovery_temperature_c": null
+    },
+    "config": {
+      "refrigerator_id": "fridge-1",
+      "lower_limit_c": 2.0,
+      "upper_limit_c": 8.0,
+      "critical_after": 1800000,
+      "stale_after": 300000,
+      "hysteresis_c": 0.0
+    },
+    "as_of": 1791557460000
+  }
+}

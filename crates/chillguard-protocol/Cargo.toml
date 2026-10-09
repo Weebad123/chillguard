@@ -6,8 +6,16 @@ edition.workspace = true
 publish.workspace = true
 
 [dependencies]
+chillguard-core = { workspace = true }
 myrmic-sdk = { workspace = true }
 serde = { workspace = true }
+thiserror = { workspace = true }
+
+# Host-only test dependencies; never part of a cell build.
+[dev-dependencies]
+# `preserve_order` keeps the golden files in wire order; `float_roundtrip`
+# keeps every f64 exact when a file is parsed back.
+serde_json = { version = "1", features = ["float_roundtrip", "preserve_order"] }
 
 [lints]
 workspace = true

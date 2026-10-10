@@ -7,13 +7,16 @@ use alloc::vec::Vec;
 use myrmic_sdk::{Command, Event};
 
 use crate::commands::{Acknowledge, GetIncidents, GetStatus, SetLimits, SimulateScenario};
-use crate::events::{AlertRaised, IncidentRecovered, ReadingObserved, StatusChanged};
+use crate::events::{
+    AlertRaised, IncidentRecovered, ReadingAccepted, ReadingObserved, StatusChanged,
+};
 use crate::responses::{IncidentList, StatusSnapshot};
 use crate::{Kind, Payload, SCHEMA_VERSION};
 
 fn kinds() -> Vec<(&'static str, Kind)> {
     alloc::vec![
         ("ReadingObserved", ReadingObserved::KIND),
+        ("ReadingAccepted", ReadingAccepted::KIND),
         ("StatusChanged", StatusChanged::KIND),
         ("AlertRaised", AlertRaised::KIND),
         ("IncidentRecovered", IncidentRecovered::KIND),

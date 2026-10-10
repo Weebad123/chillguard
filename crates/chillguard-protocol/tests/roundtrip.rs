@@ -35,6 +35,16 @@ fn reading_observed() {
 }
 
 #[test]
+fn reading_accepted() {
+    round_trip(common::reading_accepted());
+}
+
+#[test]
+fn status_snapshot_from_asset() {
+    round_trip(common::asset_status_snapshot());
+}
+
+#[test]
 fn status_changed() {
     round_trip(common::status_changed());
 }

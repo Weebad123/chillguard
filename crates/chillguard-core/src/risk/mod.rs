@@ -36,7 +36,7 @@ mod tests;
 
 pub use config::RefrigeratorConfig;
 pub use error::RiskError;
-pub use evaluate::evaluate;
+pub use evaluate::{check_reading, evaluate};
 pub use event::{DomainEvent, RejectReason};
 pub use incident::{Incident, IncidentId, Severity};
 pub use model::{Input, ReadingSource, RefrigeratorId, TemperatureReading, Timestamp};

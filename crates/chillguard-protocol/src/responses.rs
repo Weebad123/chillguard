@@ -7,6 +7,7 @@
 
 use alloc::vec::Vec;
 
+use chillguard_core::asset::AssetState;
 use chillguard_core::risk::{
     Incident, LastReading, MonitorState, RefrigeratorConfig, RefrigeratorId, Status, Timestamp,
 };
@@ -43,6 +44,26 @@ impl StatusSnapshot {
             last_reading: state.last_reading(),
             open_incident: state.open_incident().cloned(),
             config: config.clone(),
+            as_of,
+        }
+    }
+}
+
+impl StatusSnapshot {
+    /// Builds a snapshot from what the asset cell holds.
+    ///
+    /// The status is the asset's view, as fresh as the last `status_changed`
+    /// it received. The asset does not hold incidents, so `open_incident` is
+    /// always `None` here, whatever the status; incidents are the risk
+    /// monitor's to report.
+    #[must_use]
+    pub fn from_asset(asset: &AssetState, as_of: Timestamp) -> Self {
+        Self {
+            refrigerator_id: asset.config().refrigerator_id.clone(),
+            status: asset.status(),
+            last_reading: asset.last_reading(),
+            open_incident: None,
+            config: asset.config().clone(),
             as_of,
         }
     }

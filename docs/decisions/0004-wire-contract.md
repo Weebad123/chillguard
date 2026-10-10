@@ -20,8 +20,10 @@ docs/myrmic-notes.md and shapes the contract:
   `Decoder`. `#[derive(myrmic_sdk::Message)]` does that by delegating to the
   SDK's `Json` codec: compact `serde_json`, no wrapper. Bare scalars and
   `Vec<u8>` have their own encodings; `Vec<T>` of anything else has none.
-- A payload that fails to decode is logged and skipped; the handler never
-  runs. The decode error is a `&'static str`.
+- When a payload fails to decode into a handler's parameter type, the handler
+  never runs and the error, a `&'static str`, is logged. An event is then
+  dropped. A command is redelivered every five seconds without bound, like
+  any other failed command (observed; docs/myrmic-notes.md section 10).
 - Event and command names are ASCII letters, digits and underscores.
 
 Decision 0001 puts these types in `chillguard-protocol`, which depends on
@@ -33,15 +35,16 @@ Decision 0001 puts these types in `chillguard-protocol`, which depends on
 
 | Kind | Message | Name | Published or handled by |
 |---|---|---|---|
-| event | `ReadingObserved { reading }` | `reading_observed` | sensor cell publishes; asset and monitor cells subscribe |
-| event | `StatusChanged { refrigerator_id, from, to, at }` | `status_changed` | monitor cell publishes |
+| event | `ReadingObserved { reading }` | `reading_observed` | sensor cell publishes; asset cell subscribes |
+| event | `ReadingAccepted { reading, config }` | `reading_accepted` | asset cell publishes each reading it accepts, with the config in force; monitor cell subscribes (0005) |
+| event | `StatusChanged { refrigerator_id, from, to, at }` | `status_changed` | monitor cell publishes; asset cell subscribes for its status view |
 | event | `AlertRaised { severity, incident }` | `alert_raised` | monitor cell publishes, once per severity per incident |
 | event | `IncidentRecovered { incident, at, temperature_c }` | `incident_recovered` | monitor cell publishes |
-| command | `GetStatus { reply_to }` | `get_status` | asset cell answers with `StatusSnapshot` |
-| command | `GetIncidents { limit, reply_to }` | `get_incidents` | asset cell answers with `IncidentList` |
+| command | `GetStatus { reply_to }` | `get_status` | asset cell answers with `StatusSnapshot`; `open_incident` is always absent in its answer (0005) |
+| command | `GetIncidents { limit, reply_to }` | `get_incidents` | monitor cell answers with `IncidentList` (it owns the incidents, 0005) |
 | command | `SetLimits { config }` | `set_limits` | asset cell applies |
 | command | `SimulateScenario { preset, seed }` | `simulate_scenario` | sensor cell applies, development only |
-| command | `Acknowledge { incident_id }` | `acknowledge` | asset cell records |
+| command | `Acknowledge { incident_id }` | `acknowledge` | monitor cell records |
 | response | `StatusSnapshot { refrigerator_id, status, last_reading, open_incident, config, as_of }` | the caller's `reply_to` | |
 | response | `IncidentList { refrigerator_id, incidents, truncated, as_of }` | the caller's `reply_to` | |
 
@@ -60,7 +63,9 @@ one place that maps core's `DomainEvent` to these.
 
 Every message is `{"v": <u16>, "body": {...}}`. `v` is `SCHEMA_VERSION`,
 currently `1`. Version 1 is the contract as first deployed; changes made
-before that, such as moving durations to milliseconds, did not bump it. The
+before that, such as moving durations to milliseconds and correcting the
+preset name `power_failure_2h` (first written as `power_failure2h`), did not
+bump it. The
 envelope is one generic type, `Envelope<T>`, and the body types implement a
 `Payload` trait that names their kind, their wire name, and their content
 checks.
@@ -138,12 +143,17 @@ SDK's `Decoder` every error becomes a fixed string the host logs.
 `SimulateScenario` is marked `Payload::DEV_ONLY`. The protocol cannot enforce
 the gate: the sensor cell must carry a flag in its configuration and refuse
 the command when the flag is off. Rejecting it with an error would make the
-runtime redeliver it forever, so the cell should log and return `Ok`.
+runtime redeliver it forever, so the cell logs and returns `Ok`. The sensor
+cell does this with `dev_mode` in its init payload.
 
 ## Consequences
 
-- A cell's handler takes `Envelope<T>` as its payload parameter; a cell
-  publishes `Envelope::new(body)`. Nothing else needs to know about `v`.
+- A cell publishes `Envelope::new(body)`, and an event handler takes
+  `Envelope<T>` as its payload parameter. A **command** handler takes
+  `myrmic_sdk::Bytes` and calls `Envelope::decode` itself: a payload that is
+  malformed, of another version or invalid can never succeed, so the handler
+  logs it and returns `Ok`. Letting the SDK decode it would leave the command
+  in a retry loop for good.
 - A query carries `reply_to` as a string field; the cell builds
   `Callback::to(reply_to.as_str())` and invokes it on `md.sender`. A query
   sent from the CLI has a nil sender and nowhere to reply; the cell should
@@ -151,17 +161,18 @@ runtime redeliver it forever, so the cell should log and return `Ok`.
 - The dashboard, when it exists, decodes the same envelopes; the golden files
   are its reference.
 - Durations on the wire are integers of milliseconds under core's field
-  names: `"critical_after": 1800000`. `config/refrigerator.example.json`
-  still uses `critical_after_seconds` and `stale_after_seconds`, in seconds;
-  it matches neither the names nor the unit, and has to be brought in line
-  when the asset cell's init payload is defined.
+  names: `"critical_after": 1800000`. The asset cell's init payload,
+  `config/fridge-asset-cell.dev.json`, carries the same `RefrigeratorConfig`
+  in the same form.
 - Core gives `IncidentId` no public constructor. A cell receives one from the
   wire or from an `Incident`; nothing else can forge one, which is intended,
   but it means a test must deserialise one to build an `Acknowledge`.
 
 ## Open points
 
-- The init payloads of the cells (`--init`) are not part of this contract
-  yet. They will carry the refrigerator configuration, the sensor's interval,
-  and the development flag.
+- The init payloads of the cells (`--init`) are not part of this contract.
+  Each cell defines its own (`config.rs` in the cell crate) and refuses
+  unknown keys; the examples are in `config/`.
 - Paging of `GetIncidents` beyond the newest `limit` is not supported.
+- An incident's acknowledgement is stored by the monitor but not reported:
+  `Incident` has no such field, and `IncidentList` carries plain incidents.

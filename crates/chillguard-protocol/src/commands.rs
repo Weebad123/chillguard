@@ -125,6 +125,9 @@ pub enum ScenarioPreset {
     /// 24 hours of normal operation.
     NormalDay,
     /// A two-hour power failure with recovery.
+    // Named explicitly: serde's `snake_case` puts no underscore before a
+    // digit and would write `power_failure2h`.
+    #[serde(rename = "power_failure_2h")]
     PowerFailure2h,
     /// Five minutes with the door open.
     ShortDoorOpen,

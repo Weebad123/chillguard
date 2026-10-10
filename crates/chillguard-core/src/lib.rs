@@ -6,8 +6,8 @@
 //! as a parameter, so every rule can be tested deterministically on the host.
 //!
 //! It also holds the temperature [`simulator`] that stands in for a physical
-//! sensor. The simulator obeys the same constraints: seeded randomness, time
-//! as a parameter.
+//! sensor, and the state of the refrigerator [`asset`]. Both obey the same
+//! constraints: seeded randomness, time as a parameter.
 //!
 //! The crate is `no_std` (with `alloc`) because the cells that call it are
 //! `no_std` WebAssembly modules; see `docs/decisions/0001-core-vs-cells.md`.
@@ -19,6 +19,7 @@
 
 extern crate alloc;
 
+pub mod asset;
 pub mod duration_millis;
 pub mod risk;
 pub mod simulator;

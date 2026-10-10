@@ -24,7 +24,9 @@ use std::path::PathBuf;
 use chillguard_protocol::commands::{
     Acknowledge, GetIncidents, GetStatus, SetLimits, SimulateScenario,
 };
-use chillguard_protocol::events::{AlertRaised, IncidentRecovered, ReadingObserved, StatusChanged};
+use chillguard_protocol::events::{
+    AlertRaised, IncidentRecovered, ReadingAccepted, ReadingObserved, StatusChanged,
+};
 use chillguard_protocol::responses::{IncidentList, StatusSnapshot};
 use chillguard_protocol::{Envelope, Payload};
 
@@ -92,6 +94,7 @@ fn golden_files_decode_to_the_fixtures() {
         assert_eq!(decoded, Envelope::new(expected), "{name}");
     }
     check("reading_observed", common::reading_observed());
+    check("reading_accepted", common::reading_accepted());
     check("status_changed", common::status_changed());
     check("alert_raised", common::alert_raised());
     check("incident_recovered", common::incident_recovered());
@@ -101,6 +104,10 @@ fn golden_files_decode_to_the_fixtures() {
     check("simulate_scenario", common::simulate_scenario());
     check("acknowledge", common::acknowledge());
     check("status_snapshot", common::status_snapshot());
+    check(
+        "status_snapshot_from_asset",
+        common::asset_status_snapshot(),
+    );
     check("incident_list", common::incident_list());
 }
 
@@ -124,11 +131,35 @@ fn every_golden_file_has_a_fixture_and_every_fixture_a_file() {
     assert_eq!(files, fixtures);
 }
 
+/// The preset names are typed by hand into `myrmic send`, and they are the
+/// names of core's scenario constructors.
+#[test]
+fn preset_names_are_pinned() {
+    use chillguard_protocol::commands::ScenarioPreset;
+    for (preset, name) in [
+        (ScenarioPreset::NormalDay, "normal_day"),
+        (ScenarioPreset::PowerFailure2h, "power_failure_2h"),
+        (ScenarioPreset::ShortDoorOpen, "short_door_open"),
+    ] {
+        assert_eq!(
+            serde_json::to_value(preset).unwrap(),
+            serde_json::json!(name)
+        );
+        let back: ScenarioPreset = serde_json::from_value(serde_json::json!(name)).unwrap();
+        assert_eq!(back, preset);
+    }
+    // What serde's `snake_case` alone would have produced.
+    assert!(
+        serde_json::from_value::<ScenarioPreset>(serde_json::json!("power_failure2h")).is_err()
+    );
+}
+
 /// The wire names, pinned: a cell subscribes and sends by these strings.
 #[test]
 fn wire_names_are_pinned() {
     use chillguard_protocol::Kind;
     assert_eq!(ReadingObserved::KIND, Kind::Event("reading_observed"));
+    assert_eq!(ReadingAccepted::KIND, Kind::Event("reading_accepted"));
     assert_eq!(StatusChanged::KIND, Kind::Event("status_changed"));
     assert_eq!(AlertRaised::KIND, Kind::Event("alert_raised"));
     assert_eq!(IncidentRecovered::KIND, Kind::Event("incident_recovered"));

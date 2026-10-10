@@ -1,7 +1,0 @@
-{
-  "refrigerator_id": "fridge-1",
-  "lower_limit_c": 2.0,
-  "upper_limit_c": 8.0,
-  "critical_after_seconds": 1800,
-  "stale_after_seconds": 300
-}

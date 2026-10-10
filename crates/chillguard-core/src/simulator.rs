@@ -54,7 +54,11 @@
 //! # Time
 //!
 //! The first call to [`Simulator::next_reading`] starts the scenario. Each
-//! later call advances it by the time since the latest `now` seen so far. A
+//! later call advances it by the time since the latest `now` seen so far,
+//! multiplied by `time_scale`: at a scale of 60 one real second plays one
+//! scenario minute, so a two-hour power failure takes two minutes of wall
+//! time. Readings are always stamped with the real `now`; only the thermal
+//! model runs fast. A
 //! `now` that is not later than that advances nothing: the reading is stamped
 //! with the `now` it was asked for and reports the unchanged cabinet
 //! temperature. When the scenario runs out, its last phase continues for as
@@ -182,6 +186,16 @@ pub struct SimulatorConfig {
     /// Largest distance between a reading and the cabinet temperature, in
     /// degrees Celsius. Zero turns the noise off.
     pub noise_amplitude_c: f64,
+    /// How much faster than the clock the scenario plays. `1.0` is real
+    /// time; `60.0` plays a scenario minute per real second. For tests and
+    /// demonstrations; the readings' timestamps are not affected.
+    #[serde(default = "real_time")]
+    pub time_scale: f64,
+}
+
+/// The default `time_scale`: the scenario plays at the speed of the clock.
+const fn real_time() -> f64 {
+    1.0
 }
 
 impl SimulatorConfig {
@@ -197,6 +211,7 @@ impl SimulatorConfig {
             warming_time_constant: Duration::from_hours(4),
             cooling_time_constant: Duration::from_mins(20),
             noise_amplitude_c: 0.2,
+            time_scale: 1.0,
         }
     }
 
@@ -205,8 +220,9 @@ impl SimulatorConfig {
     /// # Errors
     ///
     /// Returns the first fault found: a non-finite setpoint or ambient
-    /// temperature, a zero time constant, or a noise amplitude that is
-    /// negative or not finite.
+    /// temperature, a zero time constant, a noise amplitude that is
+    /// negative or not finite, or a time scale that is not a positive
+    /// finite number.
     pub fn validate(&self) -> Result<(), SimulatorError> {
         if !self.setpoint_c.is_finite() || !self.ambient_c.is_finite() {
             return Err(SimulatorError::NonFiniteTemperature);
@@ -216,6 +232,9 @@ impl SimulatorConfig {
         }
         if !self.noise_amplitude_c.is_finite() || self.noise_amplitude_c < 0.0 {
             return Err(SimulatorError::InvalidNoiseAmplitude);
+        }
+        if !self.time_scale.is_finite() || self.time_scale <= 0.0 {
+            return Err(SimulatorError::InvalidTimeScale);
         }
         Ok(())
     }
@@ -233,6 +252,9 @@ pub enum SimulatorError {
     /// The noise amplitude is negative, NaN, or infinite.
     #[error("noise amplitude must be a finite number that is zero or positive")]
     InvalidNoiseAmplitude,
+    /// The time scale is zero, negative, NaN, or infinite.
+    #[error("time scale must be a positive finite number")]
+    InvalidTimeScale,
     /// A `Manual` step of the scenario sets a temperature that is NaN or
     /// infinite.
     #[error("the manual temperature of scenario step {step} must be a finite number")]
@@ -310,7 +332,8 @@ impl Simulator {
     /// latest one seen advances nothing; the reading is still stamped `now`.
     pub fn next_reading(&mut self, now: Timestamp) -> TemperatureReading {
         if let Some(last_at) = self.last_at {
-            self.advance(now.saturating_duration_since(last_at));
+            let elapsed = now.saturating_duration_since(last_at);
+            self.advance(elapsed.mul_f64(self.config.time_scale));
             self.last_at = Some(last_at.max(now));
         } else {
             self.last_at = Some(now);
@@ -824,6 +847,42 @@ mod tests {
     }
 
     #[test]
+    fn time_scale_plays_the_scenario_faster_but_stamps_real_time() {
+        let scenario = Scenario::power_failure_2h();
+        // At scale 60, one real second is one scenario minute.
+        let fast = SimulatorConfig {
+            time_scale: 60.0,
+            ..config()
+        };
+        let mut fast = Simulator::new(fast, scenario.clone(), 1).expect("valid");
+        let mut real = simulator(scenario, 1);
+
+        for second in 0..=300_u64 {
+            let reading = fast.next_reading(at_secs(second));
+            real.next_reading(at(second));
+            assert_eq!(
+                reading.observed_at,
+                at_secs(second),
+                "the reading carries the real clock"
+            );
+            assert_close(fast.temperature_c(), real.temperature_c(), 1e-9);
+            assert_eq!(fast.phase(), real.phase(), "second {second}");
+        }
+        // Five real minutes played the whole five-hour scenario.
+        assert_eq!(fast.phase(), Phase::Normal);
+        assert_close(fast.temperature_c(), real.temperature_c(), 1e-9);
+    }
+
+    #[test]
+    fn time_scale_defaults_to_real_time_when_absent() {
+        let text = r#"{"refrigerator_id":"fridge-1","setpoint_c":4.0,"ambient_c":22.0,"warming_time_constant":14400000,"cooling_time_constant":1200000,"noise_amplitude_c":0.2}"#;
+        let parsed: SimulatorConfig = serde_json::from_str(text).expect("deserialises");
+        assert_eq!(parsed.time_scale, 1.0);
+        assert_eq!(parsed, config());
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)] // one case per fault; splitting the table would hide gaps
     fn invalid_parameters_are_rejected() {
         struct Case {
             name: &'static str,
@@ -885,6 +944,33 @@ mod tests {
                 },
                 scenario: Scenario::normal_day(),
                 error: SimulatorError::InvalidNoiseAmplitude,
+            },
+            Case {
+                name: "zero time scale",
+                config: SimulatorConfig {
+                    time_scale: 0.0,
+                    ..config()
+                },
+                scenario: Scenario::normal_day(),
+                error: SimulatorError::InvalidTimeScale,
+            },
+            Case {
+                name: "negative time scale",
+                config: SimulatorConfig {
+                    time_scale: -1.0,
+                    ..config()
+                },
+                scenario: Scenario::normal_day(),
+                error: SimulatorError::InvalidTimeScale,
+            },
+            Case {
+                name: "infinite time scale",
+                config: SimulatorConfig {
+                    time_scale: f64::INFINITY,
+                    ..config()
+                },
+                scenario: Scenario::normal_day(),
+                error: SimulatorError::InvalidTimeScale,
             },
             Case {
                 name: "NaN manual temperature",

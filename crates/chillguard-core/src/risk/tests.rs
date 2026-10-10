@@ -1186,6 +1186,53 @@ fn invalid_config_is_an_error_for_every_input() {
     assert_eq!(widest.validate(), Ok(()));
 }
 
+/// Regression: the risk monitor cell wrote an incident's row only when an
+/// alert or recovery fired, so a query between alerts returned the incident
+/// as it was at the last alert, with its exposure and data gap out of date.
+/// `changed_incident` is what the cell now uses to know when the row is due.
+#[test]
+fn changed_incident_is_due_after_every_reading_that_touches_it() {
+    let config = config();
+    let mut state = MonitorState::new();
+    let mut expected_exposure_ms = 0;
+    let inputs = [
+        (reading(0, 5.0), false),  // in range, no incident
+        (reading(1, 9.0), true),   // opens
+        (reading(2, 9.5), true),   // extends: no event, exposure moved
+        (reading(2, 9.5), false),  // duplicate: rejected, nothing changed
+        (tick(3), false),          // a tick never touches the incident
+        (reading(10, 9.2), true),  // extends after a gap: gap flag set
+        (reading(31, 9.0), true),  // becomes critical
+        (reading(32, 9.0), true),  // extends while critical
+        (reading(33, 5.0), false), // recovers: the record is in the event
+        (reading(34, 5.0), false), // in range, no incident
+    ];
+    for (input, expect_change) in inputs {
+        let (next, _) = step(&state, input.clone(), &config);
+        let changed = next.changed_incident(&state);
+        assert_eq!(changed.is_some(), expect_change, "{input:?}");
+        if let Some(incident) = changed {
+            assert_eq!(incident, open_incident(&next), "{input:?}");
+            let Input::Reading(reading) = &input else {
+                panic!("only readings change an incident");
+            };
+            expected_exposure_ms =
+                reading.observed_at.as_millis() - incident.started_at.as_millis();
+            assert_eq!(
+                incident.exposure.as_millis(),
+                u128::from(expected_exposure_ms),
+                "{input:?}: the record is current, not as of the last alert"
+            );
+        }
+        state = next;
+    }
+    assert_eq!(
+        expected_exposure_ms,
+        31 * MINUTE_MS,
+        "minute 1 to minute 32"
+    );
+}
+
 #[test]
 fn fresh_state_is_normal_and_empty() {
     let state = MonitorState::new();

@@ -1,0 +1,20 @@
+# Runtime configuration for scripts/e2e.sh: the same as config/runtime.dev.yml
+# but off the shared network. Multicast scouting is disabled and the runtime
+# listens on loopback only, so other runtimes on the machine or LAN neither
+# find it nor receive its events, and the CLI reaches it with
+# `--connect tcp/127.0.0.1:<port>`. The harness writes a copy with E2E_PORT
+# replaced by a port of its own.
+execution:
+  tags: [e2e]
+
+telemetry:
+  logs:
+    format: COMPACT
+    env_filter: "info"
+
+zenoh:
+  scouting:
+    multicast:
+      enabled: false
+  listen:
+    endpoints: ["tcp/127.0.0.1:E2E_PORT"]

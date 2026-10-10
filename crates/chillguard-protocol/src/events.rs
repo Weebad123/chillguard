@@ -5,7 +5,8 @@
 //! handler fails, so nothing here is a request for work.
 
 use chillguard_core::risk::{
-    DomainEvent, Incident, RefrigeratorId, Severity, Status, TemperatureReading, Timestamp,
+    DomainEvent, Incident, RefrigeratorConfig, RefrigeratorId, Severity, Status,
+    TemperatureReading, Timestamp,
 };
 use serde::{Deserialize, Serialize};
 
@@ -25,6 +26,37 @@ impl Payload for ReadingObserved {
     fn validate(&self) -> Result<(), ValidationError> {
         validate::refrigerator_id(&self.reading.refrigerator_id)?;
         validate::temperature(self.reading.temperature_c)
+    }
+}
+
+/// The asset cell accepted a reading as the refrigerator's latest. Published
+/// by the asset cell; this is what the risk monitor evaluates.
+///
+/// The configuration travels with every reading, so the monitor judges a
+/// reading by the limits that were in force when it was accepted and never
+/// needs a copy of its own that could fall behind
+/// (docs/decisions/0005-state-ownership.md).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ReadingAccepted {
+    /// The accepted reading.
+    pub reading: TemperatureReading,
+    /// The refrigerator's configuration when the reading was accepted.
+    pub config: RefrigeratorConfig,
+}
+
+impl Payload for ReadingAccepted {
+    const KIND: Kind = Kind::Event("reading_accepted");
+
+    fn validate(&self) -> Result<(), ValidationError> {
+        validate::refrigerator_id(&self.reading.refrigerator_id)?;
+        validate::temperature(self.reading.temperature_c)?;
+        self.config
+            .validate()
+            .map_err(ValidationError::InvalidLimits)?;
+        if self.reading.refrigerator_id != self.config.refrigerator_id {
+            return Err(ValidationError::ReadingConfigMismatch);
+        }
+        Ok(())
     }
 }
 

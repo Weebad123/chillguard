@@ -91,6 +91,24 @@ impl MonitorState {
         self.open_incident.as_ref()
     }
 
+    /// The open incident's record if this transition changed it, for the
+    /// caller to persist.
+    ///
+    /// An incident changes on every out-of-range reading (exposure, peak
+    /// temperatures, data gap, severity), not only when an alert is raised.
+    /// A caller that stores incidents and writes a row only when an event
+    /// fires reports the open incident as it was at its last alert; this
+    /// method is the one place that says when the row is due. The incident
+    /// that a `Recovered` event closes is carried by that event.
+    #[must_use]
+    pub fn changed_incident(&self, previous: &Self) -> Option<&Incident> {
+        match (&self.open_incident, &previous.open_incident) {
+            (Some(now), Some(before)) if now == before => None,
+            (Some(now), _) => Some(now),
+            (None, _) => None,
+        }
+    }
+
     /// The time stale detection counts from: the last accepted reading, or
     /// the first tick while no reading has arrived.
     pub(super) fn silent_since(&self) -> Option<Timestamp> {

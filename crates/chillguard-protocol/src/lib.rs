@@ -15,6 +15,7 @@
 //! | Kind | Type | Wire name |
 //! |---|---|---|
 //! | event | [`events::ReadingObserved`] | `reading_observed` |
+//! | event | [`events::ReadingAccepted`] | `reading_accepted` |
 //! | event | [`events::StatusChanged`] | `status_changed` |
 //! | event | [`events::AlertRaised`] | `alert_raised` |
 //! | event | [`events::IncidentRecovered`] | `incident_recovered` |

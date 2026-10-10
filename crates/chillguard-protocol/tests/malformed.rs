@@ -389,6 +389,43 @@ fn non_finite_temperatures_cannot_be_sent_and_arrive_as_malformed() {
 }
 
 #[test]
+fn accepted_reading_must_agree_with_its_config() {
+    assert_eq!(
+        with(common::reading_accepted(), |v| {
+            v["body"]["config"]["refrigerator_id"] = json!("fridge-2");
+        }),
+        Err(ProtocolError::Invalid(
+            ValidationError::ReadingConfigMismatch
+        ))
+    );
+    assert_eq!(
+        with(common::reading_accepted(), |v| {
+            v["body"]["config"]["lower_limit_c"] = json!(9.0);
+        }),
+        Err(ProtocolError::Invalid(ValidationError::InvalidLimits(
+            RiskError::LimitsInverted {
+                lower: 9.0,
+                upper: 8.0
+            }
+        )))
+    );
+    assert_eq!(
+        with(common::reading_accepted(), |v| {
+            v["body"].as_object_mut().unwrap().remove("config");
+        }),
+        Err(ProtocolError::Malformed)
+    );
+    // A bare reading_observed is not a reading_accepted.
+    let bytes = Envelope::new(common::reading_observed())
+        .encode()
+        .expect("encodes");
+    assert_eq!(
+        Envelope::<chillguard_protocol::events::ReadingAccepted>::decode(&bytes),
+        Err(ProtocolError::Malformed)
+    );
+}
+
+#[test]
 fn status_change_must_change_the_status() {
     for status in ["normal", "warning", "critical", "sensor_stale"] {
         assert_eq!(

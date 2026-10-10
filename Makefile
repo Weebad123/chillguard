@@ -32,7 +32,7 @@ build-cells: ## Build every cell to WebAssembly
 deploy: build-cells ## Build the cells and deploy them to a running runtime
 	scripts/deploy.sh
 
-e2e: build-cells ## Smoke-test the cells on a throwaway runtime
+e2e: build-cells ## Run the end-to-end scenarios on a throwaway runtime (about 5 min)
 	scripts/e2e.sh
 
 ci: fmt-check lint test build-cells ## Run every quality gate

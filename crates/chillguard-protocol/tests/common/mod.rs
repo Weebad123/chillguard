@@ -11,6 +11,7 @@
 
 use core::time::Duration;
 
+use chillguard_core::asset::AssetState;
 use chillguard_core::risk::{
     Input, MonitorState, RefrigeratorConfig, RefrigeratorId, Status, TemperatureReading, Timestamp,
     evaluate,
@@ -18,7 +19,9 @@ use chillguard_core::risk::{
 use chillguard_protocol::commands::{
     Acknowledge, GetIncidents, GetStatus, ReplyTo, ScenarioPreset, SetLimits, SimulateScenario,
 };
-use chillguard_protocol::events::{AlertRaised, IncidentRecovered, ReadingObserved, StatusChanged};
+use chillguard_protocol::events::{
+    AlertRaised, IncidentRecovered, ReadingAccepted, ReadingObserved, StatusChanged,
+};
 use chillguard_protocol::responses::{IncidentList, StatusSnapshot};
 use chillguard_protocol::{Envelope, Incident, Payload, ReadingSource, Severity};
 
@@ -106,6 +109,24 @@ pub fn reading_observed() -> ReadingObserved {
     }
 }
 
+pub fn reading_accepted() -> ReadingAccepted {
+    ReadingAccepted {
+        reading: reading(10, 9.0),
+        config: RefrigeratorConfig {
+            hysteresis_c: 0.5,
+            ..config()
+        },
+    }
+}
+
+/// The asset's snapshot: a status view, and never an incident.
+pub fn asset_status_snapshot() -> StatusSnapshot {
+    let mut asset = AssetState::new(config()).expect("valid config");
+    asset.accept_reading(&reading(20, 12.5)).expect("accepted");
+    asset.apply_status_change(&fridge(), Status::Normal, Status::Warning, at(10));
+    StatusSnapshot::from_asset(&asset, at(21))
+}
+
 pub fn status_changed() -> StatusChanged {
     StatusChanged {
         refrigerator_id: fridge(),
@@ -188,6 +209,7 @@ pub fn all_encoded() -> Vec<(&'static str, Vec<u8>)> {
     }
     vec![
         enc("reading_observed", reading_observed()),
+        enc("reading_accepted", reading_accepted()),
         enc("status_changed", status_changed()),
         enc("alert_raised", alert_raised()),
         enc("incident_recovered", incident_recovered()),
@@ -197,6 +219,7 @@ pub fn all_encoded() -> Vec<(&'static str, Vec<u8>)> {
         enc("simulate_scenario", simulate_scenario()),
         enc("acknowledge", acknowledge()),
         enc("status_snapshot", status_snapshot()),
+        enc("status_snapshot_from_asset", asset_status_snapshot()),
         enc("incident_list", incident_list()),
     ]
 }

@@ -1,11 +1,15 @@
 //! Temperature sensor cell.
 //!
-//! Thin Myrmic adapter that will produce timestamped temperature readings at
-//! a configurable interval, simulated at first. It holds no business rules:
-//! those live in `chillguard-core`.
+//! Thin Myrmic adapter around `chillguard_core::simulator`: on a timer it
+//! reads the clock, asks the simulator for a reading, and publishes it as a
+//! `reading_observed` event. It holds no business rules and no thermal
+//! model: those live in `chillguard-core`.
 //!
-//! Stub: the cell only logs that it started.
+//! The cell is configured once, at deploy time, through its init payload
+//! ([`config::SensorConfig`]). With `dev_mode` on it also accepts the
+//! `simulate_scenario` command.
 
 #![no_std]
 
+mod config;
 mod handlers;

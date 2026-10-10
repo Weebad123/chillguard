@@ -41,6 +41,10 @@ pub enum ValidationError {
     /// time.
     #[error("recovery event does not match its incident")]
     RecoveryMismatch,
+    /// A reading and the configuration sent with it name different
+    /// refrigerators.
+    #[error("reading and configuration are for different refrigerators")]
+    ReadingConfigMismatch,
     /// A refrigerator configuration that core rejects.
     #[error("invalid limits: {0}")]
     InvalidLimits(RiskError),
@@ -72,6 +76,9 @@ impl ValidationError {
             Self::AlertSeverityMismatch => "alert severity does not match the incident",
             Self::AlertForClosedIncident => "an alert must carry an open incident",
             Self::RecoveryMismatch => "recovery event does not match its incident",
+            Self::ReadingConfigMismatch => {
+                "reading and configuration are for different refrigerators"
+            }
             Self::InvalidLimits(_) => "invalid limits",
             Self::InvalidReplyTo(reason) => reason,
             Self::LimitOutOfRange { .. } => "limit is out of range",

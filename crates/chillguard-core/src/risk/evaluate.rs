@@ -66,7 +66,7 @@ fn on_reading(
     reading: &TemperatureReading,
     config: &RefrigeratorConfig,
 ) -> (MonitorState, Vec<DomainEvent>) {
-    if let Some(reason) = rejection(state, reading, config) {
+    if let Err(reason) = check_reading(reading, state.last_reading, config) {
         return (state.clone(), vec![DomainEvent::ReadingRejected { reason }]);
     }
 
@@ -133,31 +133,43 @@ fn on_reading(
     (next, events)
 }
 
-/// Why a reading must be ignored, if it must.
-fn rejection(
-    state: &MonitorState,
+/// Decides whether a reading may be used, given the last reading that was.
+///
+/// This is the one acceptance rule of ChillGuard (decision 0003, policies 2
+/// to 5): the reading must be for the configured refrigerator, carry a finite
+/// temperature, and be later than `last_reading`. [`evaluate`] applies it to
+/// every reading; a cell that stores readings applies the same function, so
+/// that no two cells can disagree on which readings count.
+///
+/// # Errors
+///
+/// Returns the reason the reading must be ignored.
+pub fn check_reading(
     reading: &TemperatureReading,
+    last_reading: Option<LastReading>,
     config: &RefrigeratorConfig,
-) -> Option<RejectReason> {
+) -> Result<(), RejectReason> {
     if reading.refrigerator_id != config.refrigerator_id {
-        return Some(RejectReason::WrongRefrigerator {
+        return Err(RejectReason::WrongRefrigerator {
             expected: config.refrigerator_id.clone(),
             actual: reading.refrigerator_id.clone(),
         });
     }
     // NaN compares false against every limit and would read as "in range".
     if !reading.temperature_c.is_finite() {
-        return Some(RejectReason::NonFiniteTemperature);
+        return Err(RejectReason::NonFiniteTemperature);
     }
-    let last_reading_at = state.last_reading?.observed_at;
-    match reading.observed_at.cmp(&last_reading_at) {
-        Ordering::Greater => None,
-        Ordering::Equal => Some(RejectReason::Duplicate {
+    let Some(last) = last_reading else {
+        return Ok(());
+    };
+    match reading.observed_at.cmp(&last.observed_at) {
+        Ordering::Greater => Ok(()),
+        Ordering::Equal => Err(RejectReason::Duplicate {
             observed_at: reading.observed_at,
         }),
-        Ordering::Less => Some(RejectReason::OutOfOrder {
+        Ordering::Less => Err(RejectReason::OutOfOrder {
             observed_at: reading.observed_at,
-            last_reading_at,
+            last_reading_at: last.observed_at,
         }),
     }
 }

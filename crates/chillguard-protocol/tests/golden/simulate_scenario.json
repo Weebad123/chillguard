@@ -1,7 +1,7 @@
 {
   "v": 1,
   "body": {
-    "preset": "power_failure2h",
+    "preset": "power_failure_2h",
     "seed": 42
   }
 }

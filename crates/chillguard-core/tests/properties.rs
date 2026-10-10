@@ -258,6 +258,23 @@ proptest! {
         prop_assert!(criticals.values().all(|count| *count == 1), "{:?}", criticals);
     }
 
+    /// Whenever an open incident's record differs from before, the state
+    /// says so, and what it says to persist is the current record; when
+    /// nothing about the incident changed, it says nothing.
+    #[test]
+    fn changed_incident_reports_exactly_the_changes(config in config(), steps in steps()) {
+        for transition in run(&config, &steps)? {
+            let changed = transition.after.changed_incident(&transition.before);
+            let now = transition.after.open_incident();
+            let before = transition.before.open_incident();
+            match (now, before) {
+                (Some(now), Some(before)) if now == before => prop_assert_eq!(changed, None),
+                (Some(now), _) => prop_assert_eq!(changed, Some(now)),
+                (None, _) => prop_assert_eq!(changed, None),
+            }
+        }
+    }
+
     /// A rejected reading changes nothing and is reported by exactly one
     /// event; an accepted reading always becomes the last reading.
     #[test]

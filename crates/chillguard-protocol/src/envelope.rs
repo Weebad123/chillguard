@@ -56,8 +56,10 @@ pub trait Payload: Serialize + DeserializeOwned {
 /// ```
 ///
 /// `Envelope<T>` implements the SDK's `Encoder` and `Decoder`, so it is what
-/// a handler takes as its payload parameter and what a cell hands to
-/// `publish` or `send`. Both directions validate the body.
+/// a cell hands to `publish` or `send` and what an event handler takes as its
+/// payload parameter. A command handler should take the raw bytes and call
+/// [`Envelope::decode`]: the runtime redelivers a command whose payload the
+/// SDK failed to decode, without end. Both directions validate the body.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Envelope<T> {
     /// The schema version the body was written against.

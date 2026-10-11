@@ -22,7 +22,7 @@ use chillguard_protocol::commands::{
 use chillguard_protocol::events::{
     AlertRaised, IncidentRecovered, ReadingAccepted, ReadingObserved, StatusChanged,
 };
-use chillguard_protocol::responses::{IncidentList, StatusSnapshot};
+use chillguard_protocol::responses::{Acknowledgement, IncidentList, StatusSnapshot};
 use chillguard_protocol::{Envelope, Incident, Payload, ReadingSource, Severity};
 
 pub const T0_MS: u64 = 1_791_555_000_000;
@@ -195,6 +195,10 @@ pub fn incident_list() -> IncidentList {
     IncidentList {
         refrigerator_id: fridge(),
         incidents: vec![open_incident(), closed_incident()],
+        acknowledgements: vec![Acknowledgement {
+            incident_id: closed_incident().incident_id,
+            acknowledged_at: at(58),
+        }],
         truncated: true,
         as_of: at(60),
     }

@@ -1,0 +1,11 @@
+---
+source: crates/chillguard-cli/tests/render.rs
+expression: "format!(\"{header}\\n{}\", lines.join(\"\\n\"))"
+---
+watching fridge-1: status normal, last reading 4.1 °C, limits 2.0 to 8.0 °C, hysteresis 0.5 °C (Ctrl-C to stop)
+2026-10-10T02:09:00Z  reading    4.1 °C
+2026-10-10T02:10:00Z  status     normal -> warning
+2026-10-10T02:10:00Z  ALERT      warning   fridge-1-1791598200000  out of range at 9.2 °C
+2026-10-10T02:40:00Z  ALERT      critical  fridge-1-1791598200000  out of range for 30m, 9.2 to 12.4 °C, data gap
+2026-10-10T02:50:00Z  status     critical -> sensor_stale
+2026-10-10T03:45:00Z  recovered  fridge-1-1791603600000  was warning, out of range for 4m, now 6.9 °C

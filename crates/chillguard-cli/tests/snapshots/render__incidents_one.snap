@@ -1,0 +1,8 @@
+---
+source: crates/chillguard-cli/tests/render.rs
+expression: "render::incidents(&one)"
+---
+INCIDENT                SEVERITY  STARTED               RECOVERED             EXPOSURE  RANGE          GAP  ACKNOWLEDGED
+fridge-1-1791603600000  warning   2026-10-10T03:40:00Z  2026-10-10T03:45:00Z  4m        8.3 to 9.1 °C  no   no
+
+1 incident for fridge-1 as of 2026-10-10T04:00:00Z

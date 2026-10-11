@@ -1,0 +1,11 @@
+---
+source: crates/chillguard-cli/tests/render.rs
+expression: "pretty(&render::incidents_json(&none))"
+---
+{
+  "refrigerator_id": "fridge-1",
+  "incidents": [],
+  "acknowledgements": [],
+  "truncated": false,
+  "as_of": 1791604800000
+}

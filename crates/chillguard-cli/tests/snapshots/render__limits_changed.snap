@@ -1,0 +1,12 @@
+---
+source: crates/chillguard-cli/tests/render.rs
+expression: "render::limits_change(&previous, &now)"
+---
+limits changed for fridge-1
+
+SETTING         BEFORE  NOW
+lower limit     2.0 °C  none     changed
+upper limit     8.0 °C  10.0 °C  changed
+critical after  30m     1h 30m   changed
+stale after     5m      5m
+hysteresis      0.5 °C  0.5 °C

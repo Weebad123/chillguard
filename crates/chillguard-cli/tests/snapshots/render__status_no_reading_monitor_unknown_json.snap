@@ -1,0 +1,24 @@
+---
+source: crates/chillguard-cli/tests/render.rs
+expression: "pretty(&render::status_json(&report))"
+---
+{
+  "snapshot": {
+    "refrigerator_id": "fridge-1",
+    "status": "normal",
+    "last_reading": null,
+    "open_incident": null,
+    "config": {
+      "refrigerator_id": "fridge-1",
+      "lower_limit_c": null,
+      "upper_limit_c": 8.0,
+      "critical_after": 90000,
+      "stale_after": 300000,
+      "hysteresis_c": 0.0
+    },
+    "as_of": 1791597600000
+  },
+  "open_incident": null,
+  "acknowledged_at": null,
+  "monitor_error": "`risk-monitor-cell` is not deployed on a runtime this client can reach"
+}

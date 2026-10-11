@@ -136,11 +136,15 @@ fn every_golden_file_has_a_fixture_and_every_fixture_a_file() {
 #[test]
 fn preset_names_are_pinned() {
     use chillguard_protocol::commands::ScenarioPreset;
+    assert_eq!(ScenarioPreset::ALL.len(), 3);
     for (preset, name) in [
         (ScenarioPreset::NormalDay, "normal_day"),
         (ScenarioPreset::PowerFailure2h, "power_failure_2h"),
         (ScenarioPreset::ShortDoorOpen, "short_door_open"),
     ] {
+        assert!(ScenarioPreset::ALL.contains(&preset));
+        assert_eq!(preset.as_str(), name);
+        assert_eq!(preset.to_string(), name);
         assert_eq!(
             serde_json::to_value(preset).unwrap(),
             serde_json::json!(name)

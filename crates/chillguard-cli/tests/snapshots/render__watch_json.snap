@@ -1,0 +1,10 @@
+---
+source: crates/chillguard-cli/tests/render.rs
+expression: "lines.join(\"\\n\")"
+---
+{"event":"reading_accepted","body":{"reading":{"refrigerator_id":"fridge-1","temperature_c":4.12,"observed_at":1791598140000,"source":"simulated"},"config":{"refrigerator_id":"fridge-1","lower_limit_c":2.0,"upper_limit_c":8.0,"critical_after":1800000,"stale_after":300000,"hysteresis_c":0.5}}}
+{"event":"status_changed","body":{"refrigerator_id":"fridge-1","from":"normal","to":"warning","at":1791598200000}}
+{"event":"alert_raised","body":{"severity":"warning","incident":{"incident_id":"fridge-1-1791598200000","refrigerator_id":"fridge-1","started_at":1791598200000,"initial_temperature_c":9.2,"highest_temperature_c":9.2,"lowest_temperature_c":9.2,"severity":"warning","exposure":0,"has_data_gap":false,"recovered_at":null,"recovery_temperature_c":null}}}
+{"event":"alert_raised","body":{"severity":"critical","incident":{"incident_id":"fridge-1-1791598200000","refrigerator_id":"fridge-1","started_at":1791598200000,"initial_temperature_c":9.2,"highest_temperature_c":12.4,"lowest_temperature_c":9.2,"severity":"critical","exposure":1800000,"has_data_gap":true,"recovered_at":null,"recovery_temperature_c":null}}}
+{"event":"status_changed","body":{"refrigerator_id":"fridge-1","from":"critical","to":"sensor_stale","at":1791600600000}}
+{"event":"incident_recovered","body":{"incident":{"incident_id":"fridge-1-1791603600000","refrigerator_id":"fridge-1","started_at":1791603600000,"initial_temperature_c":8.6,"highest_temperature_c":9.1,"lowest_temperature_c":8.3,"severity":"warning","exposure":240000,"has_data_gap":false,"recovered_at":1791603900000,"recovery_temperature_c":6.9},"at":1791603900000,"temperature_c":6.9}}

@@ -1,0 +1,13 @@
+---
+source: crates/chillguard-cli/tests/render.rs
+expression: "render::status(&stuck)"
+---
+refrigerator  fridge-1
+status        critical
+last reading  5.0 °C at 2026-10-10T04:00:00Z (1s before this snapshot)
+limits        2.0 to 8.0 °C, hysteresis 0.5 °C
+critical      after 30m out of range
+stale         after 5m without a reading
+incident      none
+note          the status shown is an incident status but the monitor has no open incident; the asset's status view may have missed a change
+snapshot      2026-10-10T04:00:01Z

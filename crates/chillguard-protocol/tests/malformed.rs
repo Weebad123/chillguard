@@ -426,6 +426,33 @@ fn accepted_reading_must_agree_with_its_config() {
 }
 
 #[test]
+fn acknowledgements_must_belong_to_listed_incidents() {
+    assert_eq!(
+        with(common::incident_list(), |v| {
+            v["body"]["acknowledgements"][0]["incident_id"] = json!("fridge-1-1");
+        }),
+        Err(ProtocolError::Invalid(
+            ValidationError::AcknowledgementWithoutIncident
+        ))
+    );
+    // A list written before acknowledgements existed has none.
+    let decoded = with(common::incident_list(), |v| {
+        v["body"]
+            .as_object_mut()
+            .unwrap()
+            .remove("acknowledgements");
+    })
+    .expect("decodes");
+    assert!(decoded.body.acknowledgements.is_empty());
+    let closed = common::closed_incident().incident_id;
+    assert_eq!(decoded.body.acknowledged_at(&closed), None);
+    assert_eq!(
+        common::incident_list().acknowledged_at(&closed),
+        Some(common::at(58))
+    );
+}
+
+#[test]
 fn status_change_must_change_the_status() {
     for status in ["normal", "warning", "critical", "sensor_stale"] {
         assert_eq!(

@@ -1,0 +1,12 @@
+---
+source: crates/chillguard-cli/tests/render.rs
+expression: "render::status(&report)"
+---
+refrigerator  fridge-1
+status        normal
+last reading  4.1 °C at 2026-10-10T02:44:00Z (1s before this snapshot)
+limits        2.0 to 8.0 °C, hysteresis 0.5 °C
+critical      after 30m out of range
+stale         after 5m without a reading
+incident      none
+snapshot      2026-10-10T02:44:01Z

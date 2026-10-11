@@ -1,0 +1,5 @@
+---
+source: crates/chillguard-cli/tests/render.rs
+expression: fresh
+---
+watching fridge-1: status normal, no reading yet, limits 2.0 to 8.0 °C, hysteresis 0.5 °C (Ctrl-C to stop)

@@ -1,0 +1,10 @@
+---
+source: crates/chillguard-cli/tests/render.rs
+expression: "pretty(&render::simulate_json(\"site-a-sensor-cell\", preset, 7))"
+---
+{
+  "sent": true,
+  "target": "site-a-sensor-cell",
+  "preset": "power_failure_2h",
+  "seed": 7
+}

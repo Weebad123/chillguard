@@ -86,3 +86,16 @@ pub enum RejectReason {
         observed_at: Timestamp,
     },
 }
+
+impl RejectReason {
+    /// A short name for the reason, as it appears on the wire and in logs.
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::WrongRefrigerator { .. } => "wrong_refrigerator",
+            Self::NonFiniteTemperature => "non_finite_temperature",
+            Self::OutOfOrder { .. } => "out_of_order",
+            Self::Duplicate { .. } => "duplicate",
+        }
+    }
+}

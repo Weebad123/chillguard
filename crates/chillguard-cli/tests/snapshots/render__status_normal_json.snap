@@ -1,0 +1,27 @@
+---
+source: crates/chillguard-cli/tests/render.rs
+expression: "pretty(&render::status_json(&report))"
+---
+{
+  "snapshot": {
+    "refrigerator_id": "fridge-1",
+    "status": "normal",
+    "last_reading": {
+      "temperature_c": 4.12,
+      "observed_at": 1791600240000
+    },
+    "open_incident": null,
+    "config": {
+      "refrigerator_id": "fridge-1",
+      "lower_limit_c": 2.0,
+      "upper_limit_c": 8.0,
+      "critical_after": 1800000,
+      "stale_after": 300000,
+      "hysteresis_c": 0.5
+    },
+    "as_of": 1791600241250
+  },
+  "open_incident": null,
+  "acknowledged_at": null,
+  "monitor_error": null
+}

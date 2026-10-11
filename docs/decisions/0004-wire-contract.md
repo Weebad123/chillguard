@@ -46,7 +46,7 @@ Decision 0001 puts these types in `chillguard-protocol`, which depends on
 | command | `SimulateScenario { preset, seed }` | `simulate_scenario` | sensor cell applies, development only |
 | command | `Acknowledge { incident_id }` | `acknowledge` | monitor cell records |
 | response | `StatusSnapshot { refrigerator_id, status, last_reading, open_incident, config, as_of }` | the caller's `reply_to` | |
-| response | `IncidentList { refrigerator_id, incidents, truncated, as_of }` | the caller's `reply_to` | |
+| response | `IncidentList { refrigerator_id, incidents, acknowledgements, truncated, as_of }` | the caller's `reply_to` | |
 
 Facts that happened are events: anyone may listen, and a listener that was
 not there does not change what happened. Requests for work are commands: they
@@ -154,10 +154,18 @@ cell does this with `dev_mode` in its init payload.
   malformed, of another version or invalid can never succeed, so the handler
   logs it and returns `Ok`. Letting the SDK decode it would leave the command
   in a retry loop for good.
-- A query carries `reply_to` as a string field; the cell builds
-  `Callback::to(reply_to.as_str())` and invokes it on `md.sender`. A query
-  sent from the CLI has a nil sender and nowhere to reply; the cell should
-  log the response instead.
+- A query carries `reply_to` as a string field. For a caller that is a
+  cell, the responding cell builds `Callback::to(reply_to.as_str())` and
+  invokes it on `md.sender`: the response arrives as a command. A caller
+  without an identity cannot be sent anything, and that is what every
+  command from the Myrmic CLI is (nil sender). For it the responding cell
+  publishes the response as an **event** named `reply_to`, and the caller
+  subscribes to that name before it sends the query. This is how the
+  operator CLI (`crates/chillguard-cli`) gets its answers.
+- A `reply_to` used this way must come from a small fixed set, not be made
+  up per request: the runtime keeps a metric series per event name. The
+  operator CLI uses `cg_reply_<command>_<cell name>`. Anyone subscribed to
+  that name sees the answer, as with any event.
 - The dashboard, when it exists, decodes the same envelopes; the golden files
   are its reference.
 - Durations on the wire are integers of milliseconds under core's field
@@ -174,5 +182,7 @@ cell does this with `dev_mode` in its init payload.
   Each cell defines its own (`config.rs` in the cell crate) and refuses
   unknown keys; the examples are in `config/`.
 - Paging of `GetIncidents` beyond the newest `limit` is not supported.
-- An incident's acknowledgement is stored by the monitor but not reported:
-  `Incident` has no such field, and `IncidentList` carries plain incidents.
+- Acknowledgements are reported next to the incidents, not inside them:
+  `IncidentList.acknowledgements` lists `{incident_id, acknowledged_at}` for
+  the listed incidents that have one. `Incident` stays core's type, and the
+  field was added with a default, so it did not bump the version.

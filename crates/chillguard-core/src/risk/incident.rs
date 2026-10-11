@@ -19,6 +19,14 @@ use super::model::{RefrigeratorId, TemperatureReading, Timestamp};
 pub struct IncidentId(String);
 
 impl IncidentId {
+    /// Wraps an identifier that came from outside: an operator naming the
+    /// incident to acknowledge. The state machine never calls this; it
+    /// derives the identifiers of the incidents it opens.
+    #[must_use]
+    pub fn new(id: impl Into<String>) -> Self {
+        Self(id.into())
+    }
+
     fn derive(refrigerator_id: &RefrigeratorId, started_at: Timestamp) -> Self {
         Self(format!("{refrigerator_id}-{}", started_at.as_millis()))
     }
@@ -44,6 +52,23 @@ pub enum Severity {
     Warning,
     /// The excursion lasted at least the configured critical duration.
     Critical,
+}
+
+impl Severity {
+    /// The severity's name as it appears on the wire and in logs.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Warning => "warning",
+            Self::Critical => "critical",
+        }
+    }
+}
+
+impl fmt::Display for Severity {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
 /// The record of one excursion, from the first out-of-range reading to the

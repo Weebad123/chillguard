@@ -3,6 +3,7 @@ resolver = "3"
 members = [
     "crates/chillguard-core",
     "crates/chillguard-protocol",
+    "crates/chillguard-cli",
     "crates/cells/*",
 ]
 

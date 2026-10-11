@@ -48,10 +48,10 @@ for cell in "${CELLS[@]}"; do
     # A binary older than the sources it was built from is not what the
     # tree says it is. Seen once: a build reported `Finished` and left an
     # older artifact in place, and the deploy then failed in init. Test-only
-    # sources (`tests/` directories, `tests.rs` modules) are not part of a
-    # release build and are left out, or cargo's correct "nothing to do"
-    # would be refused here.
-    stale="$(find crates -name '*.rs' -not -path '*/tests/*' -not -name tests.rs -newer "$wasm" -print -quit)"
+    # sources (`tests/` directories, `tests.rs` modules) and the operator CLI
+    # are not part of a cell and are left out, or cargo's correct "nothing
+    # to do" would be refused here.
+    stale="$(find crates -name '*.rs' -not -path 'crates/chillguard-cli/*' -not -path '*/tests/*' -not -name tests.rs -newer "$wasm" -print -quit)"
     if [[ -n "$stale" ]]; then
         echo "error: $wasm is older than $stale; run 'make build-cells'" >&2
         exit 1

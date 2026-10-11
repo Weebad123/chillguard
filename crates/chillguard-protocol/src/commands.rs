@@ -25,7 +25,14 @@ use crate::validate::ValidationError;
 /// inside what a cell can assemble and a receiver can read.
 pub const MAX_INCIDENT_LIMIT: u16 = 100;
 
-/// The name of the command on the caller that receives a response.
+/// The name under which the caller receives a response.
+///
+/// A caller that is a cell receives the response as a command of this name.
+/// A caller without an identity, which is what a command sent with the
+/// Myrmic CLI is, cannot be sent anything: for it the response is published
+/// as an event of this name, and the caller subscribes to it first. Such a
+/// caller should derive the name from the question it asks, not make one
+/// up per request: the runtime keeps a metric series per event name.
 ///
 /// Must be a valid Myrmic command name: ASCII letters, digits and
 /// underscores, not empty.
@@ -134,6 +141,19 @@ pub enum ScenarioPreset {
 }
 
 impl ScenarioPreset {
+    /// Every preset.
+    pub const ALL: [Self; 3] = [Self::NormalDay, Self::PowerFailure2h, Self::ShortDoorOpen];
+
+    /// The preset's name as it appears on the wire and in logs.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::NormalDay => "normal_day",
+            Self::PowerFailure2h => "power_failure_2h",
+            Self::ShortDoorOpen => "short_door_open",
+        }
+    }
+
     /// The simulator scenario this preset names.
     #[must_use]
     pub fn scenario(self) -> Scenario {
@@ -142,6 +162,12 @@ impl ScenarioPreset {
             Self::PowerFailure2h => Scenario::power_failure_2h(),
             Self::ShortDoorOpen => Scenario::short_door_open(),
         }
+    }
+}
+
+impl fmt::Display for ScenarioPreset {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 

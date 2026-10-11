@@ -12,6 +12,10 @@
 # at the end whatever happened. On a failed assertion the relevant cell log
 # lines and the runtime's warnings are printed.
 #
+# The cells are driven and queried through the operator CLI (`chillguard`,
+# crates/chillguard-cli), so every run also tests it against a real runtime.
+# What happened inside the cells is asserted on their log lines.
+#
 # Events travel the whole network, not one runtime, and state has been seen
 # to go missing while other nodes were around. The runtime is therefore kept
 # off the network: multicast scouting disabled, listening on loopback only
@@ -85,8 +89,8 @@ fail() {
     failures=$((failures + 1))
     say "FAIL [$scenario] $*" >&2
     {
-        echo "--- cell log, last 40 lines (readings and query answers left out) ---"
-        cell_log | grep -vE ' reading (accepted )?refrigerator_id|status snapshot=|incidents=' | tail -n 40 | cut -c1-240
+        echo "--- cell log, last 40 lines (readings and answered queries left out) ---"
+        cell_log | grep -vE ' reading (accepted )?refrigerator_id| (status|incidents) sent ' | tail -n 40 | cut -c1-240
         echo "--- cell log, last 5 readings ---"
         cell_log | grep -E ' reading refrigerator_id' | tail -n 5 | cut -c1-200
         echo "--- runtime warnings and errors ---"
@@ -189,41 +193,29 @@ send() {
 }
 
 # ---------------------------------------------------------------------------
-# Queries: commands from the CLI have no sender, so the cells log the answer.
+# The operator CLI, pointed at this run's runtime (MYRMIC_CONNECT is exported
+# above) and at the current scenario's cells.
 # ---------------------------------------------------------------------------
 
-# Prints the next JSON a cell logs under `<marker>=`, after sending `cmd`.
-query() {
-    local target="$1" cmd="$2" payload="$3" marker="$4"
-    local before after
-    before="$(cell_log | grep -c "${marker}=" || true)"
-    send "$target" "$cmd" "$payload"
-    for _ in $(seq 1 20); do
-        after="$(cell_log | grep -c "${marker}=" || true)"
-        if [[ "$after" -gt "$before" ]]; then
-            cell_log | grep "${marker}=" | tail -n 1 | sed "s/.*${marker}=//"
-            return 0
-        fi
-        sleep 0.5
-    done
-    echo "error: no answer to ${cmd} within 10 s" >&2
-    return 1
+cg() {
+    "$chillguard" --prefix "$SRN_PREFIX" "$@"
 }
 
+# `chillguard --json status`: {"snapshot": {...}, "open_incident": ..., ...}
 get_status() {
-    query "$(asset)" get_status '{"v":1,"body":{"reply_to":"on_status"}}' "status snapshot"
+    cg --json status
 }
 
+# `chillguard --json incidents`: {"incidents": [...], "acknowledgements": [...], ...}
 get_incidents() {
-    query "$(monitor)" get_incidents '{"v":1,"body":{"limit":20,"reply_to":"on_incidents"}}' incidents
+    cg --json incidents --limit 20
 }
 
-# json <json> <python expression over `b` (the body)>
+# json <json document> <python expression over it, as `b`>
 json() {
     python3 -I -c '
 import json, sys
-body = json.loads(sys.argv[1])["body"]
-value = eval(sys.argv[2], {}, {"b": body})
+value = eval(sys.argv[2], {}, {"b": json.loads(sys.argv[1])})
 print(json.dumps(value) if not isinstance(value, str) else value)
 ' "$1" "$2"
 }
@@ -231,7 +223,7 @@ print(json.dumps(value) if not isinstance(value, str) else value)
 status_is() {
     local snapshot
     snapshot="$(get_status)" || return 1
-    [[ "$(json "$snapshot" 'b["status"]')" == "$1" ]]
+    [[ "$(json "$snapshot" 'b["snapshot"]["status"]')" == "$1" ]]
 }
 
 # ---------------------------------------------------------------------------
@@ -275,13 +267,26 @@ scenario_normal() {
     sleep 15
     local snapshot incidents
     snapshot="$(get_status)" || { fail "no status snapshot"; return; }
-    assert_eq "status" normal "$(json "$snapshot" 'b["status"]')"
-    assert_eq "refrigerator_id" "$fridge" "$(json "$snapshot" 'b["refrigerator_id"]')"
-    assert_eq "a reading was accepted" true "$(json "$snapshot" 'b["last_reading"] is not None')"
+    assert_eq "status" normal "$(json "$snapshot" 'b["snapshot"]["status"]')"
+    assert_eq "refrigerator_id" "$fridge" "$(json "$snapshot" 'b["snapshot"]["refrigerator_id"]')"
+    assert_eq "a reading was accepted" true "$(json "$snapshot" 'b["snapshot"]["last_reading"] is not None')"
+    assert_eq "no open incident" true "$(json "$snapshot" 'b["open_incident"] is None and b["monitor_error"] is None')"
     assert_eq "last reading in range" true \
-        "$(json "$snapshot" '2.0 <= b["last_reading"]["temperature_c"] <= 8.0')"
+        "$(json "$snapshot" '2.0 <= b["snapshot"]["last_reading"]["temperature_c"] <= 8.0')"
     incidents="$(get_incidents)" || { fail "no incident list"; return; }
     assert_eq "incidents" 0 "$(json "$incidents" 'len(b["incidents"])')"
+
+    step "changing a limit through the CLI, and back"
+    cg set-limits --upper 9.5 >/dev/null || fail "set-limits --upper 9.5 failed"
+    assert_eq "upper limit" 9.5 "$(json "$(get_status)" 'b["snapshot"]["config"]["upper_limit_c"]')"
+    cg set-limits --upper 8 >/dev/null || fail "set-limits --upper 8 failed"
+    assert_eq "upper limit restored" 8.0 "$(json "$(get_status)" 'b["snapshot"]["config"]["upper_limit_c"]')"
+    assert_log_count "limit changes logged" 2 "limits changed refrigerator_id=${fridge} "
+    if cg set-limits --lower 20 >/dev/null 2>&1; then
+        fail "set-limits accepted a lower limit above the upper limit"
+    else
+        say "ok   [$scenario] an invalid limit is refused by the CLI"
+    fi
     assert_log_count "alerts" 0 "ALERT"
     assert_log_count "status changes" 0 "status changed"
     assert_log_count "rejected readings" 0 "reading rejected"
@@ -292,7 +297,7 @@ scenario_normal() {
 scenario_excursion() {
     deploy_cells
     step "starting short_door_open (door opens after 10 s, stays open 5 s)"
-    send "$(sensor)" simulate_scenario '{"v":1,"body":{"preset":"short_door_open","seed":7}}'
+    cg simulate short_door_open --seed 7 >/dev/null || { fail "simulate failed"; return; }
     expect_status warning 30
     expect_status critical 20
     local incidents open
@@ -315,10 +320,24 @@ scenario_excursion() {
     assert_eq "recovery temperature inside the hysteresis band" true \
         "$(json "$incidents" 'b["incidents"][0]["recovery_temperature_c"] <= 7.5')"
     assert_eq "no data gap" false "$(json "$incidents" 'b["incidents"][0]["has_data_gap"]')"
-    assert_log_count "warning alerts" 1 "ALERT warning"
-    assert_log_count "critical alerts" 1 "ALERT critical"
+    assert_log_count "warning alerts" 1 "ALERT severity=warning"
+    assert_log_count "critical alerts" 1 "ALERT severity=critical"
     assert_log_count "recoveries" 1 "recovered refrigerator_id"
     assert_log_count "status changes" 3 "status changed refrigerator_id"
+
+    step "acknowledging the incident through the CLI"
+    local id
+    id="$(json "$incidents" 'b["incidents"][0]["incident_id"]')"
+    cg ack "$id" >/dev/null || fail "ack ${id} failed"
+    incidents="$(get_incidents)" || { fail "no incident list"; return; }
+    assert_eq "acknowledged incident" "$id" "$(json "$incidents" 'b["acknowledgements"][0]["incident_id"]')"
+    cg ack "$id" >/dev/null || fail "a second ack ${id} failed"
+    assert_log_count "acknowledgements recorded" 1 "incident acknowledged refrigerator_id=${fridge} incident_id=${id} "
+    if cg ack "${fridge}-1" >/dev/null 2>&1; then
+        fail "ack accepted an unknown incident"
+    else
+        say "ok   [$scenario] an unknown incident is refused by the CLI"
+    fi
 }
 
 # The sensor stops: the monitor's tick declares it stale within stale_after
@@ -350,7 +369,7 @@ scenario_stale() {
 scenario_restart() {
     deploy_cells
     step "starting power_failure_2h (power fails after 30 s, warms past 8 °C about 60 s later)"
-    send "$(sensor)" simulate_scenario '{"v":1,"body":{"preset":"power_failure_2h","seed":3}}'
+    cg simulate power_failure_2h --seed 3 >/dev/null || { fail "simulate failed"; return; }
     expect_status warning 150
     expect_status critical 20
     local before incident_id exposure_before
@@ -373,7 +392,7 @@ scenario_restart() {
     local outage=$(( $(date +%s) - down_at ))
     say "     outage lasted about ${outage}s"
     # The monitor's init must find the open incident, not raise it again.
-    assert_log_count "monitor resumed critical" 1 "risk-monitor-cell started .*resumed=true status=Critical incident_id=${incident_id}"
+    assert_log_count "monitor resumed critical" 1 "risk-monitor-cell started .*resumed=true status=critical incident_id=${incident_id}"
     assert_log_count "asset resumed" 1 "fridge-asset-cell started .*resumed=true"
     sleep 3
     local after
@@ -386,17 +405,19 @@ scenario_restart() {
     assert_eq "exposure grew by at least the outage" true \
         "$(json "$after" "b[\"incidents\"][0][\"exposure\"] >= $exposure_before + ${down_for}000 - 1000")"
     assert_eq "outage recorded as a data gap" true "$(json "$after" 'b["incidents"][0]["has_data_gap"]')"
-    assert_eq "status after restart" critical "$(json "$(get_status)" 'b["status"]')"
-    assert_log_count "warning alerts (whole scenario)" 1 "ALERT warning"
-    assert_log_count "critical alerts (whole scenario)" 1 "ALERT critical"
+    assert_eq "status after restart" critical "$(json "$(get_status)" 'b["snapshot"]["status"]')"
+    assert_eq "status reports the open incident" "$incident_id" \
+        "$(json "$(get_status)" 'b["open_incident"]["incident_id"]')"
+    assert_log_count "warning alerts (whole scenario)" 1 "ALERT severity=warning"
+    assert_log_count "critical alerts (whole scenario)" 1 "ALERT severity=critical"
 
     expect_status normal 150
     after="$(get_incidents)" || { fail "no incident list"; return; }
     assert_eq "incident recovered" true "$(json "$after" 'b["incidents"][0]["recovered_at"] is not None')"
     assert_eq "recovered incident keeps critical" critical "$(json "$after" 'b["incidents"][0]["severity"]')"
     assert_log_count "recoveries" 1 "recovered refrigerator_id"
-    assert_log_count "warning alerts (whole scenario)" 1 "ALERT warning"
-    assert_log_count "critical alerts (whole scenario)" 1 "ALERT critical"
+    assert_log_count "warning alerts (whole scenario)" 1 "ALERT severity=warning"
+    assert_log_count "critical alerts (whole scenario)" 1 "ALERT severity=critical"
 }
 
 # ---------------------------------------------------------------------------
@@ -411,12 +432,16 @@ for s in "${scenarios[@]}"; do
     declare -F "scenario_$s" >/dev/null || { echo "unknown scenario: $s" >&2; exit 2; }
 done
 
+# The operator CLI is how this harness talks to the cells; build it first.
+cargo build --quiet -p chillguard-cli
+chillguard="target/debug/chillguard"
+
 # The same checks deploy.sh makes, before a runtime is started for nothing:
 # every binary exists and is newer than the sources.
 for cell in "${CELLS[@]}"; do
     wasm="$(wasm_path "$cell")"
     [[ -f "$wasm" ]] || { echo "error: $wasm not found; run 'make build-cells' first" >&2; exit 1; }
-    stale="$(find crates -name '*.rs' -not -path '*/tests/*' -not -name tests.rs -newer "$wasm" -print -quit)"
+    stale="$(find crates -name '*.rs' -not -path 'crates/chillguard-cli/*' -not -path '*/tests/*' -not -name tests.rs -newer "$wasm" -print -quit)"
     [[ -z "$stale" ]] || { echo "error: $wasm is older than $stale; run 'make build-cells' first" >&2; exit 1; }
 done
 

@@ -1233,6 +1233,55 @@ fn changed_incident_is_due_after_every_reading_that_touches_it() {
     );
 }
 
+/// Logs and the operator CLI print these names; they must be the ones the
+/// wire uses, or a status read in a log cannot be searched for in a payload.
+#[test]
+fn display_names_are_the_wire_names() {
+    use alloc::string::ToString;
+    for status in [
+        Status::Normal,
+        Status::Warning,
+        Status::Critical,
+        Status::SensorStale,
+    ] {
+        let wire = serde_json::to_value(status).expect("serialises");
+        assert_eq!(wire, serde_json::json!(status.to_string()));
+    }
+    for severity in [Severity::Warning, Severity::Critical] {
+        let wire = serde_json::to_value(severity).expect("serialises");
+        assert_eq!(wire, serde_json::json!(severity.to_string()));
+    }
+    let reasons = [
+        RejectReason::WrongRefrigerator {
+            expected: RefrigeratorId::new("a"),
+            actual: RefrigeratorId::new("b"),
+        },
+        RejectReason::NonFiniteTemperature,
+        RejectReason::OutOfOrder {
+            observed_at: at(1),
+            last_reading_at: at(2),
+        },
+        RejectReason::Duplicate { observed_at: at(1) },
+    ];
+    for reason in reasons {
+        // Externally tagged: the variant name is the key, or the whole value.
+        let wire = serde_json::to_value(&reason).expect("serialises");
+        let name = wire
+            .as_str()
+            .map(ToString::to_string)
+            .or_else(|| wire.as_object().and_then(|o| o.keys().next().cloned()))
+            .expect("a variant name");
+        assert_eq!(name, reason.as_str());
+    }
+}
+
+#[test]
+fn incident_id_from_outside_equals_the_derived_one() {
+    let (state, _) = run(&config(), vec![reading(1, 9.0)]);
+    let derived = &open_incident(&state).incident_id;
+    assert_eq!(&IncidentId::new(derived.as_str()), derived);
+}
+
 #[test]
 fn fresh_state_is_normal_and_empty() {
     let state = MonitorState::new();

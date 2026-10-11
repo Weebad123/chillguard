@@ -29,6 +29,14 @@ const ASSET: State<AssetState> = State::new_const("asset");
 /// The `record_history` setting of the current deployment.
 const RECORD_HISTORY: State<bool> = State::new_const("record_history");
 
+/// A value for a log field, or `none`.
+fn or_none<T: core::fmt::Display>(value: Option<T>) -> String {
+    value.map_or_else(
+        || String::from("none"),
+        |value| myrmic_sdk::format!("{value}"),
+    )
+}
+
 fn load() -> Result<AssetState> {
     ASSET.load()?.ok_or("asset state is missing")
 }
@@ -72,16 +80,18 @@ fn init(md: Metadata, init: AssetInit) -> Result {
     RECORD_HISTORY.save(&init.record_history)?;
     let config = asset.config();
     myrmic_sdk::info!(
-        "fridge-asset-cell started id={} refrigerator_id={} resumed={resumed} lower_limit_c={:?} \
-         upper_limit_c={} status={:?} last_reading_at={:?} record_history={}",
+        "fridge-asset-cell started id={} refrigerator_id={} resumed={resumed} status={} \
+         observed_at={} lower_limit_c={} upper_limit_c={} record_history={}",
         md.id,
         config.refrigerator_id,
-        config.lower_limit_c,
-        config.upper_limit_c,
         asset.status(),
-        asset
-            .last_reading()
-            .map(|last| last.observed_at.as_millis()),
+        or_none(
+            asset
+                .last_reading()
+                .map(|last| last.observed_at.as_millis())
+        ),
+        or_none(config.lower_limit_c),
+        config.upper_limit_c,
         init.record_history,
     )?;
     Ok(())
@@ -99,9 +109,11 @@ fn reading_observed(_md: Metadata, event: Envelope<ReadingObserved>) -> Result {
         Err(RejectReason::WrongRefrigerator { .. }) => return Ok(()),
         Err(reason) => {
             myrmic_sdk::warn!(
-                "reading rejected refrigerator_id={} observed_at={} reason={reason:?}",
+                "reading rejected refrigerator_id={} temperature_c={:.3} observed_at={} reason={}",
                 reading.refrigerator_id,
+                reading.temperature_c,
                 reading.observed_at.as_millis(),
+                reason.as_str(),
             )?;
             return Ok(());
         }
@@ -152,7 +164,7 @@ fn status_changed(_md: Metadata, event: Envelope<StatusChanged>) -> Result {
     match asset.apply_status_change(&refrigerator_id, from, to, at) {
         StatusUpdate::OtherRefrigerator => {}
         StatusUpdate::Outdated => myrmic_sdk::warn!(
-            "status change ignored refrigerator_id={refrigerator_id} to={to:?} at={} \
+            "status change ignored refrigerator_id={refrigerator_id} status={to} at={} \
              reason=older_than_the_view",
             at.as_millis(),
         )?,
@@ -163,13 +175,13 @@ fn status_changed(_md: Metadata, event: Envelope<StatusChanged>) -> Result {
             ASSET.save(&asset)?;
             if missed_a_change {
                 myrmic_sdk::warn!(
-                    "status view was behind refrigerator_id={refrigerator_id} showed={previous:?} \
-                     change_starts_from={from:?}"
+                    "status view was behind refrigerator_id={refrigerator_id} \
+                     previous_status={previous} announced_previous_status={from}"
                 )?;
             }
             myrmic_sdk::info!(
-                "status view changed refrigerator_id={refrigerator_id} from={previous:?} to={to:?} \
-                 at={}",
+                "status view changed refrigerator_id={refrigerator_id} status={to} \
+                 previous_status={previous} at={}",
                 at.as_millis(),
             )?;
         }
@@ -186,15 +198,21 @@ fn get_status(md: Metadata, payload: Bytes) -> Result {
     let now = u64::try_from(myrmic_sdk::now()?.as_millis()).map_err(|_| "clock out of range")?;
     let snapshot = StatusSnapshot::from_asset(&load()?, Timestamp::from_millis(now));
     let snapshot = Envelope::new(snapshot);
-    if md.sender.is_nil() {
-        // Sent from the CLI: there is no cell to reply to, so the answer
-        // goes to the log.
-        let json = snapshot.encode().map_err(|error| error.as_str())?;
-        myrmic_sdk::info!("status snapshot={}", String::from_utf8_lossy(&json))?;
-        return Ok(());
-    }
-    Callback::to(reply_to.as_str())?.invoke(md.sender, &snapshot)?;
-    myrmic_sdk::info!("status sent to={} reply_to={reply_to}", md.sender)?;
+    // A cell gets the answer as a command. A caller without an identity (the
+    // Myrmic CLI) cannot be sent anything, so for it the answer is published
+    // as an event under the name it asked for.
+    let via = if md.sender.is_nil() {
+        myrmic_sdk::publish(reply_to.as_str(), &snapshot)?;
+        "event"
+    } else {
+        Callback::to(reply_to.as_str())?.invoke(md.sender, &snapshot)?;
+        "command"
+    };
+    myrmic_sdk::info!(
+        "status sent refrigerator_id={} status={} reply_to={reply_to} via={via}",
+        snapshot.body.refrigerator_id,
+        snapshot.body.status,
+    )?;
     Ok(())
 }
 
@@ -210,17 +228,20 @@ fn set_limits(_md: Metadata, payload: Bytes) -> Result {
             ASSET.save(&asset)?;
             let config = asset.config();
             myrmic_sdk::info!(
-                "limits changed refrigerator_id={} lower_limit_c={:?} upper_limit_c={} \
+                "limits changed refrigerator_id={} lower_limit_c={} upper_limit_c={} \
                  critical_after_ms={} stale_after_ms={} hysteresis_c={}",
                 config.refrigerator_id,
-                config.lower_limit_c,
+                or_none(config.lower_limit_c),
                 config.upper_limit_c,
                 config.critical_after.as_millis(),
                 config.stale_after.as_millis(),
                 config.hysteresis_c,
             )?;
         }
-        Ok(false) => myrmic_sdk::info!("limits unchanged: the configuration is already in force")?,
+        Ok(false) => myrmic_sdk::info!(
+            "limits unchanged refrigerator_id={}",
+            asset.config().refrigerator_id
+        )?,
         Err(error) => myrmic_sdk::warn!("set_limits rejected reason=\"{error}\"")?,
     }
     Ok(())

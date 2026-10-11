@@ -29,8 +29,10 @@
 //!
 //! Events are published for anyone to observe (`myrmic_sdk::publish`).
 //! Commands are sent to one cell (`myrmic_sdk::send`) and are redelivered
-//! until the handler succeeds. A query command carries a [`commands::ReplyTo`]
-//! naming the command on the caller that receives the response.
+//! until the handler succeeds. A query command carries a [`commands::ReplyTo`]:
+//! the name under which the caller receives the response, as a command if
+//! the caller is a cell and as an event if it has no identity (the Myrmic
+//! CLI, and through it the operator CLI).
 //!
 //! Encoding is JSON through the SDK's codec, the same one that
 //! `#[derive(myrmic_sdk::Message)]` binds. Decoding checks the schema

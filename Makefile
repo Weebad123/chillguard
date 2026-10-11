@@ -4,7 +4,7 @@ CELLS    := sensor-cell fridge-asset-cell risk-monitor-cell
 CELL_DIR := crates/cells
 
 .DEFAULT_GOAL := help
-.PHONY: help fmt fmt-check lint test build-cells deploy e2e ci
+.PHONY: help fmt fmt-check lint test build-cells cli deploy e2e ci
 
 help: ## List the targets
 	@grep -E '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  %-12s %s\n", $$1, $$2}'
@@ -29,10 +29,13 @@ build-cells: ## Build every cell to WebAssembly
 		myrmic build $(CELL_DIR)/$$cell; \
 	done
 
+cli: ## Build the operator CLI (target/debug/chillguard)
+	cargo build -p chillguard-cli
+
 deploy: build-cells ## Build the cells and deploy them to a running runtime
 	scripts/deploy.sh
 
-e2e: build-cells ## Run the end-to-end scenarios on a throwaway runtime (about 5 min)
+e2e: build-cells cli ## Run the end-to-end scenarios on a throwaway runtime (about 5 min)
 	scripts/e2e.sh
 
 ci: fmt-check lint test build-cells ## Run every quality gate

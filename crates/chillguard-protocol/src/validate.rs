@@ -45,6 +45,9 @@ pub enum ValidationError {
     /// refrigerators.
     #[error("reading and configuration are for different refrigerators")]
     ReadingConfigMismatch,
+    /// An incident list acknowledges an incident it does not list.
+    #[error("acknowledgement of an incident that is not in the list")]
+    AcknowledgementWithoutIncident,
     /// A refrigerator configuration that core rejects.
     #[error("invalid limits: {0}")]
     InvalidLimits(RiskError),
@@ -78,6 +81,9 @@ impl ValidationError {
             Self::RecoveryMismatch => "recovery event does not match its incident",
             Self::ReadingConfigMismatch => {
                 "reading and configuration are for different refrigerators"
+            }
+            Self::AcknowledgementWithoutIncident => {
+                "acknowledgement of an incident that is not in the list"
             }
             Self::InvalidLimits(_) => "invalid limits",
             Self::InvalidReplyTo(reason) => reason,

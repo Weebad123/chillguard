@@ -1,0 +1,12 @@
+---
+source: crates/chillguard-cli/tests/render.rs
+expression: "render::status(&report)"
+---
+refrigerator  fridge-1
+status        normal
+last reading  none yet
+limits        up to 8.0 °C
+critical      after 1m 30s out of range
+stale         after 5m without a reading
+incident      unknown (`risk-monitor-cell` is not deployed on a runtime this client can reach)
+snapshot      2026-10-10T02:00:00Z

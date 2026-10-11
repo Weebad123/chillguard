@@ -1,0 +1,5 @@
+---
+source: crates/chillguard-cli/tests/render.rs
+expression: "render::ack(id, repeat)"
+---
+incident fridge-1-1791598200000 was already acknowledged at 2026-10-10T02:42:00Z; nothing sent

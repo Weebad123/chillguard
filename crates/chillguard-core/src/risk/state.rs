@@ -1,5 +1,7 @@
 //! The monitor's state between two inputs.
 
+use core::fmt;
+
 use serde::{Deserialize, Serialize};
 
 use super::incident::{Incident, Severity};
@@ -17,6 +19,25 @@ pub enum Status {
     Critical,
     /// No reading arrived within `stale_after`. An incident may still be open.
     SensorStale,
+}
+
+impl Status {
+    /// The status's name as it appears on the wire and in logs.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Normal => "normal",
+            Self::Warning => "warning",
+            Self::Critical => "critical",
+            Self::SensorStale => "sensor_stale",
+        }
+    }
+}
+
+impl fmt::Display for Status {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
 impl From<Severity> for Status {

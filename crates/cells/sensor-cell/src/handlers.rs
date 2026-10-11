@@ -106,17 +106,23 @@ fn simulate_scenario(_md: Metadata, payload: Bytes) -> Result {
     let SimulateScenario { preset, seed } = match Envelope::decode(&payload) {
         Ok(envelope) => envelope.body,
         Err(error) => {
-            myrmic_sdk::warn!("simulate_scenario dropped reason=\"{error}\"")?;
+            myrmic_sdk::warn!("simulate_scenario rejected reason=\"{error}\"")?;
             return Ok(());
         }
     };
     let config = CONFIG.load()?.ok_or("configuration is missing")?;
     if !config.dev_mode {
-        myrmic_sdk::warn!("simulate_scenario refused preset={preset:?} reason=dev_mode_off")?;
+        myrmic_sdk::warn!(
+            "simulate_scenario rejected refrigerator_id={} preset={preset} reason=dev_mode_off",
+            config.refrigerator_id
+        )?;
         return Ok(());
     }
     SIMULATOR.save(&new_simulator(&config, preset, seed)?)?;
-    myrmic_sdk::info!("scenario started preset={preset:?} seed={seed}")?;
+    myrmic_sdk::info!(
+        "scenario started refrigerator_id={} preset={preset} seed={seed}",
+        config.refrigerator_id
+    )?;
     Ok(())
 }
 

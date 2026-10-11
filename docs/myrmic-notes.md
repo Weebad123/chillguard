@@ -282,8 +282,9 @@ Wire format seen on `subscribe`: `{"observed_at_ms":1791555717928,"refrigerator_
   deployed`), an unparsable runtime config, or no node discovered. `myrmic cells --once <srn>` exits
   0 even when the cell is not registered (prints `Cell <srn> is not registered`).
 - Redeploying a name that is live fails with `application '<srn>' is already deployed`.
-- `myrmic runtimes start <file.yml>` rejects unknown config keys
-  (`unknown field 'bogus_section'`), so a config file that starts is a config file whose keys exist.
+- `myrmic runtimes start <file.yml>` rejects an unknown **top-level** key
+  (`unknown field 'bogus_section'`). Inside `execution` and `telemetry` an unknown key is ignored
+  without a message (section 14), so a file that starts proves little about nested keys.
   `config/runtime.dev.yml` (`execution.tags`, `telemetry.logs.format`, `telemetry.logs.env_filter`) starts.
 - Placement tags work as documented: a runtime started with `--tag t` accepts `deploy --tag t`; a
   deploy requiring a tag no runtime carries fails with `deployment infeasible ... missing required tags`.
@@ -533,9 +534,11 @@ it relies on, all observed:
   `XDG_DATA_HOME` keeps the database out of everyone's way and is removed at the end.
 - **One SRN prefix per scenario.** State lives under the SRI, which is derived from the SRN, so
   `e2e-<pid>-<scenario>-<cell>` gives every scenario empty state without any reset command.
-- **Queries from the CLI are read back from the log.** A `get_status` sent by `myrmic send` has
-  a nil sender, so the cell logs `status snapshot={json}`; the harness counts those lines before
-  sending and waits for one more. The same for `incidents=`.
+- **Queries go through the operator CLI.** The harness first read answers back from the cells'
+  logs (`status snapshot={json}`), because a `myrmic send` has a nil sender. Since the cells
+  answer such a caller with an event (section 14), it calls `chillguard --json status` and
+  `chillguard --json incidents` instead, and uses `simulate`, `set-limits` and `ack` as well, so
+  every run tests the operator CLI against a real runtime.
 - **Runtime restart timings.** `runtimes delete` then `runtimes start` and three deploys took
   about 10 s end to end on this machine; the cells' first readings after a restart were 9 s
   apart from the last ones before it. To test the data-gap policy the harness keeps the runtime
@@ -609,12 +612,77 @@ it relies on, all observed:
 - The same holds for production: two deployments that name the same refrigerator and can see
   each other on the network will feed each other's readings.
 
-## 14. Open questions / not yet verified
+## 14. Operator CLI and observability (2026-10-10) [local]
+
+**A client outside the swarm: the Myrmic CLI as transport**
+
+- `chillguard` (crates/chillguard-cli) runs `myrmic send` and `myrmic subscribe` as child
+  processes. Of the three documented ways in for an external client, this is the one already
+  verified here; the gateway needs cells to mount routes and a gateway node, and bridges are for
+  calling out. [docs] https://book.myrmic.dev/docs/reference/myrmic-sdk/external-systems/gateway-routes
+- **Answers to a caller without an identity travel as events.** A cell cannot reply to a command
+  from `myrmic send` (nil sender), so the asset and monitor cells `publish(reply_to, &answer)`
+  in that case and `Callback::to(reply_to)?.invoke(sender, ..)` otherwise. The client subscribes
+  to the name, sends the query, reads the event. Measured: subscriber ready 89 ms after start,
+  answer 135 ms after the send, `chillguard status` (two queries) 0.44 s in all.
+- `myrmic subscribe <name>` as a child process: events go to **stdout** (an empty line, the
+  header `[<time>] event=<name> sender=<sri> payload=<n> bytes`, the payload pretty-printed);
+  `INFO  subscribed to: <name> (ctrl-c to stop)` goes to **stderr** and is the signal that the
+  subscription is in place. Stdout is flushed per event, also into a pipe.
+- `myrmic send`: `INFO  trace ID = <id>` and `INFO  successfully sent command` on stderr, exit 0.
+  To a name that is not deployed: `ERROR command failed: cell <sri> has no placement`, exit 1.
+  With no runtime reachable, `subscribe` prints
+  `ERROR no myrmic nodes discovered within <timeout> (extend with --timeout)` and exits 1.
+- `--timeout` takes plain milliseconds (`10000ms`).
+- A `myrmic subscribe` whose parent was killed keeps running and shows up in
+  `myrmic network status` as a node of kind `cli` (`myrmic subscribe @ user@host`). Kill the
+  process itself, not a shell wrapper around it.
+
+**One metric series per event name**
+
+- `myrmic telemetry metrics` lists `cell_events_sent` once per event name
+  (`event=<name>`). A reply name made up per request (`cg_reply_<pid>_<clock>_<n>`) added a
+  series per query: 32 after a few minutes of manual use. The client now derives the name from
+  the query and the cell asked (`cg_reply_get_status_<cell>`), which gave exactly two series.
+  Any name a cell publishes under should come from a small fixed set.
+
+**Observability commands, as run** (guide: https://book.myrmic.dev/docs/guides/observability)
+
+- `myrmic network status` and `myrmic cells status` exist and print what `network --once` and
+  `cells --once` print. `network status` also lists connected CLI clients.
+- `telemetry.db_retention: "10m"` in the runtime configuration turns the telemetry store on at
+  start: `myrmic telemetry logs` returned the runtime's own start-up lines with no
+  `set-db-retention` having been run.
+- `myrmic telemetry logs --trace-id <id>` with the id `myrmic send` printed returned exactly the
+  cell's line for that command.
+- `myrmic telemetry metrics` printed 46 metric names about 90 s after the retention was set,
+  coloured even into a pipe (strip with `sed -E 's/\x1b\[[0-9;]*m//g'`). Per-cell metrics carry
+  `sri=`; `cell_commands_processed` carries `cmd=`, `cell_events_processed` carries `event=`.
+- `myrmic telemetry traces --trace-id <id>`: six spans, 1.8 KB, for one `get_status`. All traces
+  after two minutes of three cells at one reading a second: 784 KB.
+- `myrmic telemetry debug --timeout 4s` streamed `EVENT=<name> payload=<json>` lines and the
+  cells' log lines live, with no retention set for it.
+- Not tried: `set-filter`, `-v` on `telemetry logs`, export to an OpenTelemetry collector.
+- **Nested unknown configuration keys are silently ignored.** `execution:\n  bogus: 1` and
+  `telemetry:\n  bogus: 1` start without a message; only an unknown top-level key is an error.
+  The observability tutorial says the same. This corrects section 8.
+
+**Logs**
+
+- All three cells now write the same keys for the same things (`refrigerator_id`,
+  `incident_id`, `status`, `previous_status`, `severity`, `temperature_c`, `observed_at`, `at`,
+  `reason`), with status and severity in their wire spelling. The table is in
+  docs/operations.md.
+- The cells no longer write query answers into the log; the end-to-end harness asks through
+  `chillguard --json` instead of scraping `status snapshot=` lines.
+
+## 15. Open questions / not yet verified
 
 - `app_specs.yml` build/deploy (`classes`/`instances`) is documented but not exercised.
 - Gateway (`myrmic gateway`, `gateway` routes/assets) for a dashboard is documented but not exercised.
 - `find_measurement` was not exercised; buffer sizing for responses is the caller's problem.
-- The reply path of a query (`Callback::to(name)?.invoke(md.sender, &reply)`) has not run yet:
-  every `get_status` and `get_incidents` so far came from the CLI, whose sender is nil.
+- The reply path of a query from a **cell** (`Callback::to(name)?.invoke(md.sender, &reply)`) has
+  not run yet: every `get_status` and `get_incidents` so far came from the CLI, whose sender is
+  nil and which is answered by an event (section 14).
 - Whether anything can make cells come back by themselves after a runtime restart
   (an `app_specs.yml` deployment, perhaps) is not known. `--policy always` does not.

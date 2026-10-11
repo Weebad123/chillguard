@@ -1,0 +1,6 @@
+---
+source: crates/chillguard-cli/tests/render.rs
+expression: "render::simulate(\"site-a-sensor-cell\", preset, 7)"
+---
+sent scenario power_failure_2h (seed 7) to site-a-sensor-cell
+The sensor only plays it when its dev_mode is on, and does not answer; its log says `scenario started` or `simulate_scenario rejected`.

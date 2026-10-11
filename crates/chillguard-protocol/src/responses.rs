@@ -9,7 +9,8 @@ use alloc::vec::Vec;
 
 use chillguard_core::asset::AssetState;
 use chillguard_core::risk::{
-    Incident, LastReading, MonitorState, RefrigeratorConfig, RefrigeratorId, Status, Timestamp,
+    Incident, IncidentId, LastReading, MonitorState, RefrigeratorConfig, RefrigeratorId, Status,
+    Timestamp,
 };
 use serde::{Deserialize, Serialize};
 
@@ -86,6 +87,15 @@ impl Payload for StatusSnapshot {
     }
 }
 
+/// A person has seen an incident.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Acknowledgement {
+    /// The incident that was acknowledged.
+    pub incident_id: IncidentId,
+    /// When the first acknowledgement arrived.
+    pub acknowledged_at: Timestamp,
+}
+
 /// A page of incidents, newest first. The answer to
 /// [`crate::commands::GetIncidents`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -94,10 +104,26 @@ pub struct IncidentList {
     pub refrigerator_id: RefrigeratorId,
     /// The incidents, newest first. An open incident, if any, comes first.
     pub incidents: Vec<Incident>,
+    /// The acknowledgements of the incidents in `incidents`; an incident
+    /// without an entry here has not been acknowledged. Absent on the wire
+    /// means none.
+    #[serde(default)]
+    pub acknowledgements: Vec<Acknowledgement>,
     /// Whether more incidents exist than were returned.
     pub truncated: bool,
     /// When the list was assembled.
     pub as_of: Timestamp,
+}
+
+impl IncidentList {
+    /// When `incident_id` was acknowledged, if it has been.
+    #[must_use]
+    pub fn acknowledged_at(&self, incident_id: &IncidentId) -> Option<Timestamp> {
+        self.acknowledgements
+            .iter()
+            .find(|acknowledgement| acknowledgement.incident_id == *incident_id)
+            .map(|acknowledgement| acknowledgement.acknowledged_at)
+    }
 }
 
 impl Payload for IncidentList {
@@ -105,6 +131,16 @@ impl Payload for IncidentList {
 
     fn validate(&self) -> Result<(), ValidationError> {
         validate::refrigerator_id(&self.refrigerator_id)?;
-        self.incidents.iter().try_for_each(validate::incident)
+        self.incidents.iter().try_for_each(validate::incident)?;
+        for acknowledgement in &self.acknowledgements {
+            let listed = self
+                .incidents
+                .iter()
+                .any(|incident| incident.incident_id == acknowledgement.incident_id);
+            if !listed {
+                return Err(ValidationError::AcknowledgementWithoutIncident);
+            }
+        }
+        Ok(())
     }
 }

@@ -32,7 +32,7 @@ use chillguard_core::risk::{
 };
 use chillguard_protocol::commands::{Acknowledge, GetIncidents};
 use chillguard_protocol::events::{MonitorEvent, ReadingAccepted};
-use chillguard_protocol::responses::IncidentList;
+use chillguard_protocol::responses::{Acknowledgement, IncidentList};
 use chillguard_protocol::{Envelope, Payload};
 use myrmic_sdk::db::state::State;
 use myrmic_sdk::db::table::Table;
@@ -100,7 +100,11 @@ fn arm_timer(config: &RefrigeratorConfig) -> Result {
     }
     let handle = myrmic_sdk::interval(Callback::of::<tick>(), period).build()?;
     TIMER.with(|slot| *slot = Some((handle, period)))?;
-    myrmic_sdk::info!("tick armed period_ms={}", period.as_millis())?;
+    myrmic_sdk::info!(
+        "tick armed refrigerator_id={} period_ms={}",
+        config.refrigerator_id,
+        period.as_millis()
+    )?;
     Ok(())
 }
 
@@ -108,6 +112,10 @@ fn arm_timer(config: &RefrigeratorConfig) -> Result {
 /// returned. The one place where the monitor's state changes.
 fn apply(input: Input, config: &RefrigeratorConfig) -> Result {
     let fridge = &config.refrigerator_id;
+    let reading = match &input {
+        Input::Reading(reading) => Some(reading.clone()),
+        Input::Tick { .. } => None,
+    };
     let state = MONITOR.load()?.unwrap_or_default();
     let (next, events) = evaluate(&state, input, config).map_err(|_| "invalid configuration")?;
 
@@ -141,55 +149,61 @@ fn apply(input: Input, config: &RefrigeratorConfig) -> Result {
         }
     }
 
-    // Log.
+    // Log. Every line names the refrigerator, the incident (or `none`) and
+    // the status after this input; lines caused by a reading also carry its
+    // temperature and timestamp.
+    let status = next.status();
     let incident_id = next
         .open_incident()
         .map_or("none", |incident| incident.incident_id.as_str());
+    let reading = match &reading {
+        Some(reading) => myrmic_sdk::format!(
+            " temperature_c={:.3} observed_at={}",
+            reading.temperature_c,
+            reading.observed_at.as_millis()
+        ),
+        None => String::new(),
+    };
     for event in &events {
         match event {
-            DomainEvent::StatusChanged { from, to, at } => myrmic_sdk::info!(
-                "status changed refrigerator_id={fridge} from={from:?} to={to:?} at={} \
-                 incident_id={incident_id}",
+            DomainEvent::StatusChanged { from, at, .. } => myrmic_sdk::info!(
+                "status changed refrigerator_id={fridge} incident_id={incident_id} status={status} \
+                 previous_status={from} at={}",
                 at.as_millis()
             )?,
             DomainEvent::WarningRaised { incident } => myrmic_sdk::warn!(
-                "ALERT warning refrigerator_id={fridge} incident_id={} temperature_c={:.3} \
-                 started_at={}",
-                incident.incident_id,
-                incident.initial_temperature_c,
-                incident.started_at.as_millis()
+                "ALERT severity=warning refrigerator_id={fridge} incident_id={} \
+                 status={status}{reading}",
+                incident.incident_id
             )?,
             DomainEvent::CriticalRaised { incident } => myrmic_sdk::warn!(
-                "ALERT critical refrigerator_id={fridge} incident_id={} exposure_ms={} \
-                 highest_temperature_c={:.3} data_gap={}",
+                "ALERT severity=critical refrigerator_id={fridge} incident_id={} \
+                 status={status}{reading} exposure_ms={} highest_temperature_c={:.3} data_gap={}",
                 incident.incident_id,
                 incident.exposure.as_millis(),
                 incident.highest_temperature_c,
                 incident.has_data_gap
             )?,
-            DomainEvent::Recovered {
-                incident,
-                at,
-                temperature,
-            } => myrmic_sdk::info!(
-                "recovered refrigerator_id={fridge} incident_id={} severity={:?} exposure_ms={} \
-                 temperature_c={temperature:.3} at={}",
+            DomainEvent::Recovered { incident, .. } => myrmic_sdk::info!(
+                "recovered refrigerator_id={fridge} incident_id={} status={status}{reading} \
+                 severity={} exposure_ms={}",
                 incident.incident_id,
                 incident.severity,
-                incident.exposure.as_millis(),
-                at.as_millis()
+                incident.exposure.as_millis()
             )?,
             DomainEvent::SensorStale { since } => myrmic_sdk::warn!(
-                "sensor stale refrigerator_id={fridge} since={} incident_id={incident_id}",
+                "sensor stale refrigerator_id={fridge} incident_id={incident_id} status={status} \
+                 since={}",
                 since.as_millis()
             )?,
-            DomainEvent::SensorResumed { at } => myrmic_sdk::info!(
-                "sensor resumed refrigerator_id={fridge} at={}",
-                at.as_millis()
+            DomainEvent::SensorResumed { .. } => myrmic_sdk::info!(
+                "sensor resumed refrigerator_id={fridge} incident_id={incident_id} \
+                 status={status}{reading}"
             )?,
-            DomainEvent::ReadingRejected { reason } => {
-                myrmic_sdk::warn!("reading rejected refrigerator_id={fridge} reason={reason:?}")?;
-            }
+            DomainEvent::ReadingRejected { reason } => myrmic_sdk::warn!(
+                "reading rejected refrigerator_id={fridge}{reading} reason={}",
+                reason.as_str()
+            )?,
         }
     }
     Ok(())
@@ -216,7 +230,7 @@ fn init(md: Metadata, init: MonitorInit) -> Result {
     }
     let state = MONITOR.load()?.unwrap_or_default();
     myrmic_sdk::info!(
-        "risk-monitor-cell started id={} refrigerator_id={} resumed={resumed} status={:?} \
+        "risk-monitor-cell started id={} refrigerator_id={} resumed={resumed} status={} \
          incident_id={} incidents={} config_known={}",
         md.id,
         init.refrigerator_id,
@@ -261,27 +275,39 @@ fn get_incidents(md: Metadata, payload: Bytes) -> Result {
     };
     let rows = INCIDENTS.list_rev()?;
     let truncated = rows.len() > usize::from(limit);
-    let incidents: Vec<Incident> = rows
-        .into_iter()
-        .take(usize::from(limit))
-        .map(|row| row.incident)
-        .collect();
+    let mut incidents = Vec::new();
+    let mut acknowledgements = Vec::new();
+    for row in rows.into_iter().take(usize::from(limit)) {
+        if let Some(acknowledged_at) = row.acknowledged_at {
+            acknowledgements.push(Acknowledgement {
+                incident_id: row.incident.incident_id.clone(),
+                acknowledged_at,
+            });
+        }
+        incidents.push(row.incident);
+    }
+    let refrigerator_id = FRIDGE.load()?.ok_or("refrigerator_id is missing")?;
     let list = Envelope::new(IncidentList {
-        refrigerator_id: FRIDGE.load()?.ok_or("refrigerator_id is missing")?,
+        refrigerator_id,
         incidents,
+        acknowledgements,
         truncated,
         as_of: now()?,
     });
-    if md.sender.is_nil() {
-        // Sent from the CLI: nobody to reply to, so the answer goes to the log.
-        let json = list.encode().map_err(|error| error.as_str())?;
-        myrmic_sdk::info!("incidents={}", String::from_utf8_lossy(&json))?;
-        return Ok(());
-    }
-    Callback::to(reply_to.as_str())?.invoke(md.sender, &list)?;
+    // A cell gets the answer as a command. A caller without an identity (the
+    // Myrmic CLI) cannot be sent anything, so for it the answer is published
+    // as an event under the name it asked for.
+    let via = if md.sender.is_nil() {
+        myrmic_sdk::publish(reply_to.as_str(), &list)?;
+        "event"
+    } else {
+        Callback::to(reply_to.as_str())?.invoke(md.sender, &list)?;
+        "command"
+    };
     myrmic_sdk::info!(
-        "incidents sent to={} reply_to={reply_to} count={} truncated={truncated}",
-        md.sender,
+        "incidents sent refrigerator_id={} count={} truncated={truncated} reply_to={reply_to} \
+         via={via}",
+        list.body.refrigerator_id,
         list.body.incidents.len()
     )?;
     Ok(())
@@ -301,9 +327,10 @@ fn acknowledge(_md: Metadata, payload: Bytes) -> Result {
         )?;
         return Ok(());
     };
+    let fridge = &row.incident.refrigerator_id;
     if let Some(at) = row.acknowledged_at {
         myrmic_sdk::info!(
-            "acknowledge repeated incident_id={incident_id} first_acknowledged_at={}",
+            "acknowledge repeated refrigerator_id={fridge} incident_id={incident_id} at={}",
             at.as_millis()
         )?;
         return Ok(());
@@ -312,11 +339,9 @@ fn acknowledge(_md: Metadata, payload: Bytes) -> Result {
     row.acknowledged_at = Some(at);
     INCIDENTS.insert_with(&key, &row)?;
     myrmic_sdk::info!(
-        "incident acknowledged refrigerator_id={} incident_id={incident_id} severity={:?} \
-         open={} at={}",
+        "incident acknowledged refrigerator_id={} incident_id={incident_id} severity={} at={}",
         row.incident.refrigerator_id,
         row.incident.severity,
-        row.incident.is_open(),
         at.as_millis()
     )?;
     Ok(())

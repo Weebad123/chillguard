@@ -1,0 +1,9 @@
+---
+source: crates/chillguard-cli/tests/render.rs
+expression: "pretty(&render::ack_json(id, done))"
+---
+{
+  "incident_id": "fridge-1-1791598200000",
+  "acknowledged_at": 1791600120000,
+  "already_acknowledged": false
+}

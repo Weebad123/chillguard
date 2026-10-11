@@ -1235,6 +1235,33 @@ fn changed_incident_is_due_after_every_reading_that_touches_it() {
 
 /// Logs and the operator CLI print these names; they must be the ones the
 /// wire uses, or a status read in a log cannot be searched for in a payload.
+/// The fixed strings a cell returns from `init` name the field at fault and
+/// say the same thing as `Display`, less the values.
+#[test]
+fn risk_error_as_str_names_the_field_at_fault() {
+    let cases = [
+        (RiskError::NonFiniteLimit, "limits"),
+        (
+            RiskError::LimitsInverted {
+                lower: 9.0,
+                upper: 8.0,
+            },
+            "lower_limit_c",
+        ),
+        (RiskError::InvalidHysteresis, "hysteresis_c"),
+        (
+            RiskError::HysteresisTooWide { hysteresis: 4.0 },
+            "hysteresis_c",
+        ),
+        (RiskError::ZeroStaleAfter, "stale_after"),
+    ];
+    for (error, field) in cases {
+        let text = error.as_str();
+        assert!(text.contains(field), "{error:?}: {text}");
+        assert!(!text.is_empty() && text.len() < 80, "{error:?}");
+    }
+}
+
 #[test]
 fn display_names_are_the_wire_names() {
     use alloc::string::ToString;

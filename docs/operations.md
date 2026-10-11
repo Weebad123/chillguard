@@ -102,8 +102,11 @@ incident is an observation. It does not say the contents are safe.
 
 The cells of one refrigerator are the three names behind `--prefix`. After a
 runtime restart `myrmic cells status` is empty: a restart releases the cells
-and they must be deployed again (`make deploy`); their state is kept
-(docs/myrmic-notes.md, section 11).
+and they must be deployed again (`make deploy`, with the same `PROFILE` and
+`SRN_PREFIX` as before); their state is kept (docs/myrmic-notes.md, section
+11). `make deploy` uses the `prod` payloads, under which `chillguard
+simulate` is refused; `make deploy PROFILE=dev` uses the development ones
+(config/README.md).
 
 ## Logs
 

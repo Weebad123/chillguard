@@ -4,7 +4,7 @@ use chillguard_core::risk::RefrigeratorId;
 use myrmic_sdk::Message;
 use serde::{Deserialize, Serialize};
 
-/// The init payload: `myrmic deploy ... --init-file config/sensor-cell.dev.json`.
+/// The init payload: `myrmic deploy ... --init-file config/sensor-cell.<profile>.json`.
 ///
 /// Unknown fields are refused, so a misspelt key fails the deployment
 /// instead of silently leaving a setting at its default.
@@ -22,7 +22,8 @@ pub(crate) struct SensorConfig {
     #[serde(default)]
     pub seed: u64,
     /// How much faster than the clock the scenario plays; `1.0` is real
-    /// time. Readings are still stamped with the real clock. For tests.
+    /// time. Readings are still stamped with the real clock. For tests and
+    /// demonstrations: any other value needs `dev_mode`.
     #[serde(default = "real_time")]
     pub time_scale: f64,
 }
@@ -43,6 +44,11 @@ impl SensorConfig {
         }
         if !self.time_scale.is_finite() || self.time_scale <= 0.0 {
             return Err("time_scale must be a positive finite number");
+        }
+        // Exactly the default is real time; anything else is a compressed
+        // or stretched clock, which only a development deployment may run.
+        if self.time_scale.to_bits() != real_time().to_bits() && !self.dev_mode {
+            return Err("time_scale other than 1 needs dev_mode: true");
         }
         Ok(())
     }

@@ -68,7 +68,7 @@ impl Client {
     /// Sends a query and waits for its answer.
     ///
     /// The answer comes back as an event named by the query's `reply_to`
-    /// (see [`reply_name`]), so the subscription is started first and the
+    /// (see `reply_name` below), so the subscription is started first and the
     /// query sent once it is in place.
     ///
     /// # Errors

@@ -33,3 +33,23 @@ pub enum RiskError {
     #[error("stale_after must be longer than zero")]
     ZeroStaleAfter,
 }
+
+impl RiskError {
+    /// The fault as a fixed string, for callers whose errors are
+    /// `&'static str` (a cell's handlers). Names the field at fault without
+    /// the values that [`fmt::Display`](core::fmt::Display) adds.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::NonFiniteLimit => "temperature limits must be finite numbers",
+            Self::LimitsInverted { .. } => "lower_limit_c is above upper_limit_c",
+            Self::InvalidHysteresis => {
+                "hysteresis_c must be a finite number that is zero or positive"
+            }
+            Self::HysteresisTooWide { .. } => {
+                "hysteresis_c leaves no temperature that counts as recovered"
+            }
+            Self::ZeroStaleAfter => "stale_after must be longer than zero",
+        }
+    }
+}

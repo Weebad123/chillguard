@@ -6,7 +6,7 @@
 //! model: those live in `chillguard-core`.
 //!
 //! The cell is configured once, at deploy time, through its init payload
-//! ([`config::SensorConfig`]). With `dev_mode` on it also accepts the
+//! (`config::SensorConfig`). With `dev_mode` on it also accepts the
 //! `simulate_scenario` command.
 
 #![no_std]

@@ -29,8 +29,14 @@ missing_docs = "warn"
 
 [workspace.lints.clippy]
 pedantic = { level = "warn", priority = -1 }
-# Project standard: no unwrap()/expect()/panic!() outside tests. Tests are
+# Project standard: no unwrap()/expect()/panic!() outside tests, and none of
+# the other ways to stop on purpose or to index past the end. Tests are
 # exempted in clippy.toml.
 unwrap_used = "deny"
 expect_used = "deny"
 panic = "deny"
+unreachable = "deny"
+todo = "deny"
+unimplemented = "deny"
+indexing_slicing = "deny"
+exit = "deny"

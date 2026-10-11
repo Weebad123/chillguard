@@ -1,0 +1,31 @@
+# Myrmic runtime configuration for one host, kept off the network.
+#
+# Multicast discovery is off and the runtime listens on loopback only, so no
+# other runtime or CLI on the LAN can find it, join it, or send it anything;
+# only a process on this host can (docs/security.md, "limiting access to
+# control commands"). Every CLI call must then say where the runtime is:
+#
+#   myrmic runtimes start config/runtime.local.yml --name chillguard --detached
+#   export MYRMIC_CONNECT=tcp/127.0.0.1:20123     # read by chillguard and the scripts
+#   make deploy
+#   chillguard status
+#
+# The same pattern, with a port per run, is what scripts/e2e.sh uses
+# (config/e2e/runtime.yml). Key reference:
+# https://book.myrmic.dev/docs/reference/configuration/runtime-configuration
+# The runtime refuses an unknown top-level key but ignores a misspelt key
+# inside a section without a message; check that a setting took effect.
+execution:
+  tags: [site-a]
+
+telemetry:
+  logs:
+    format: COMPACT
+    env_filter: "info"
+
+zenoh:
+  scouting:
+    multicast:
+      enabled: false
+  listen:
+    endpoints: ["tcp/127.0.0.1:20123"]

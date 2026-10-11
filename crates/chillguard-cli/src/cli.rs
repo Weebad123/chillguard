@@ -120,13 +120,21 @@ pub struct SetLimits {
     pub hysteresis: Option<f64>,
 }
 
+/// The longest duration any argument accepts: a year. Nothing this program
+/// does takes longer, and a bound keeps every `Instant + Duration` that a
+/// timeout or `--for` feeds from overflowing.
+const MAX_DURATION: Duration = Duration::from_hours(366 * 24);
+
 /// Parses `30m`, `90s`, `1500ms`, `1h 30m`. Durations travel as whole
 /// milliseconds, so anything finer is refused here, where the message can
-/// name the argument.
+/// name the argument; so is anything longer than [`MAX_DURATION`].
 fn parse_duration(text: &str) -> Result<Duration, String> {
     let duration = humantime::parse_duration(text).map_err(|error| error.to_string())?;
     if duration.subsec_nanos() % 1_000_000 != 0 {
         return Err("must be a whole number of milliseconds".to_string());
+    }
+    if duration > MAX_DURATION {
+        return Err("must be at most a year".to_string());
     }
     Ok(duration)
 }

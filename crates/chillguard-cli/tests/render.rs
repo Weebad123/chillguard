@@ -8,7 +8,7 @@
 //! git diff crates/chillguard-cli/tests/snapshots
 //! ```
 
-#![allow(clippy::expect_used, clippy::unwrap_used)]
+#![allow(clippy::expect_used, clippy::unwrap_used, clippy::indexing_slicing)]
 
 mod common;
 

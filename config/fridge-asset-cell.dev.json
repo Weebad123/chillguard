@@ -3,8 +3,8 @@
     "refrigerator_id": "fridge-1",
     "lower_limit_c": 2.0,
     "upper_limit_c": 8.0,
-    "critical_after": 1800000,
-    "stale_after": 300000,
+    "critical_after": 60000,
+    "stale_after": 30000,
     "hysteresis_c": 0.5
   },
   "record_history": true

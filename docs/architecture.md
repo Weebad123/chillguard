@@ -180,15 +180,19 @@ Do not assume that local persistence automatically replicates state or guarantee
 ## 8. MVP scope and acceptance criteria
 
 ### Required
-- [ ] One simulated refrigerator.
-- [ ] Timestamped readings at a configurable interval.
-- [ ] Configurable temperature limits.
-- [ ] Correct excursion-duration tracking.
-- [ ] Warning and critical alerts with duplicate suppression.
-- [ ] Recovery event and incident history.
-- [ ] CLI or simple dashboard showing state.
-- [ ] Automated tests for normal, warming, critical, recovery, stale-reading, and restart scenarios.
-- [ ] README with setup, run, and demo instructions.
+
+Met in v0.1.0; docs/acceptance.md maps each item to the code and the tests
+that satisfy it, and lists what is still open.
+
+- [x] One simulated refrigerator.
+- [x] Timestamped readings at a configurable interval.
+- [x] Configurable temperature limits.
+- [x] Correct excursion-duration tracking.
+- [x] Warning and critical alerts with duplicate suppression.
+- [x] Recovery event and incident history.
+- [x] CLI or simple dashboard showing state.
+- [x] Automated tests for normal, warming, critical, recovery, stale-reading, and restart scenarios.
+- [x] README with setup, run, and demo instructions.
 
 ### Next Phase after the MVP
 - [ ] Second refrigerator and second Myrmic node.

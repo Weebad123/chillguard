@@ -1,0 +1,63 @@
+# cargo-deny configuration: licences and advisories for every dependency.
+# Run with `cargo deny check` (or `make deny`); CI runs it on every push.
+# Reference: https://embarkstudios.github.io/cargo-deny/checks/index.html
+
+[graph]
+# The cells are built for wasm32 and the CLI for the host; check both trees.
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "wasm32-unknown-unknown",
+]
+all-features = true
+
+[advisories]
+version = 2
+db-path = "~/.cargo/advisory-db"
+db-urls = ["https://github.com/rustsec/advisory-db"]
+# A crate pulled from crates.io after it was yanked is a build that cannot be
+# reproduced; refuse it.
+yanked = "deny"
+# Advisories that are accepted after review go here, each with a reason.
+ignore = []
+
+[licenses]
+version = 2
+# Permissive licences only. A new dependency under anything else fails the
+# check until it is reviewed and either added here or replaced.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "ISC",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+# How sure the SPDX detection must be when a crate ships a licence text
+# without a `license` field.
+confidence-threshold = 0.9
+# An allowed licence that no current dependency uses is not a fault.
+unused-allowed-license = "allow"
+# The workspace crates are `publish = false` and carry no `license` field.
+private = { ignore = true }
+
+[bans]
+# Two versions of one crate in the tree are a cost, not a fault; report them.
+multiple-versions = "warn"
+# A `*` version requirement would let a build change under us. Path
+# dependencies between the workspace crates carry no version and are not
+# that; they are allowed.
+wildcards = "deny"
+allow-wildcard-paths = true
+highlight = "all"
+deny = []
+skip = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

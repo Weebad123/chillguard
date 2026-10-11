@@ -4,7 +4,7 @@ use chillguard_core::risk::RefrigeratorId;
 use myrmic_sdk::Message;
 use serde::{Deserialize, Serialize};
 
-/// The init payload: `myrmic deploy ... --init-file config/risk-monitor-cell.dev.json`.
+/// The init payload: `myrmic deploy ... --init-file config/risk-monitor-cell.<profile>.json`.
 ///
 /// The refrigerator's limits are not part of it: they arrive with every
 /// `reading_accepted`, from the asset cell that owns them.

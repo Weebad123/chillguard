@@ -2,5 +2,6 @@
   "refrigerator_id": "fridge-1",
   "interval_ms": 1000,
   "dev_mode": true,
-  "seed": 42
+  "seed": 42,
+  "time_scale": 60.0
 }

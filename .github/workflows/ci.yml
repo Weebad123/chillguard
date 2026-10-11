@@ -1,0 +1,198 @@
+# ChillGuard quality gates. Every job runs on the toolchain pinned by
+# rust-toolchain.toml (docs/decisions/0002-toolchain-and-workspace.md), so
+# what CI checks is what `myrmic build` ships.
+#
+# Jobs:
+#   check     fmt, clippy (warnings are errors), unit and integration tests
+#   wasm      every cell built to WebAssembly with the Myrmic CLI
+#   deny      cargo-deny: licences and security advisories (deny.toml)
+#   coverage  cargo-llvm-cov, chillguard-core must stay at or above 90 % lines
+#   e2e       the end-to-end harness on a throwaway runtime; manual only
+#             (workflow_dispatch), see the note on the job.
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      e2e:
+        description: "Also run the end-to-end harness (about 5 minutes)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_NET_RETRY: "10"
+  RUSTUP_MAX_RETRIES: "10"
+  # The channel, components and target below must match rust-toolchain.toml.
+  TOOLCHAIN: nightly-2026-08-07
+  # The Myrmic CLI release the cells are built and tested against
+  # (docs/myrmic-notes.md, section 1). The checksum is the one published in
+  # the release's SHA256SUMS.
+  MYRMIC_VERSION: "0.7.0"
+  MYRMIC_DEB_SHA256: 1c2f26bf97109ff7335c0fac7d0562e6fa9b49b7ca7c5c97e1cb23b031a5c6ce
+
+jobs:
+  check:
+    name: fmt, clippy, tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the pinned toolchain
+        run: |
+          rustup toolchain install "$TOOLCHAIN" --profile minimal \
+            --component cargo,rustfmt,clippy,rust-src \
+            --target wasm32-unknown-unknown
+          rustup show active-toolchain
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: check
+
+      - name: Format
+        run: cargo fmt --all --check
+
+      - name: Clippy (warnings are errors)
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Unit and integration tests
+        run: cargo test --workspace --locked
+
+      - name: Docs build without warnings
+        run: cargo doc --workspace --no-deps --locked
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+  wasm:
+    name: Wasm build of the cells
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the pinned toolchain
+        run: |
+          rustup toolchain install "$TOOLCHAIN" --profile minimal \
+            --component cargo,rust-src \
+            --target wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: wasm
+
+      - name: Install the Myrmic CLI
+        run: |
+          set -euo pipefail
+          base="https://github.com/peeriot/myrmic/releases/download/myrmic/v${MYRMIC_VERSION}"
+          deb="myrmic-cli_${MYRMIC_VERSION}_amd64.deb"
+          dir="$(mktemp -d)"
+          curl -fsSL --retry 5 -o "$dir/$deb" "$base/$deb"
+          echo "${MYRMIC_DEB_SHA256}  $dir/$deb" | sha256sum -c -
+          sudo apt-get install -y "$dir/$deb"
+          myrmic --version
+
+      - name: Build every cell
+        run: make build-cells
+
+      - name: Keep the binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: cells-wasm
+          path: target/wasm32-unknown-unknown/release/*.wasm
+          if-no-files-found: error
+          retention-days: 14
+
+  deny:
+    name: cargo-deny (licences, advisories)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+          arguments: --all-features
+          # Advisory data changes under us; a new advisory must fail the
+          # build, which the default `log-level` and `command-arguments` do.
+
+  coverage:
+    name: coverage of chillguard-core (>= 90 %)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the pinned toolchain
+        run: |
+          rustup toolchain install "$TOOLCHAIN" --profile minimal \
+            --component cargo,rust-src,llvm-tools-preview \
+            --target wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: coverage
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+
+      - name: Measure and enforce
+        # Every host test in the workspace runs instrumented, so the lines of
+        # core that the protocol and CLI tests exercise count too. The report
+        # is then narrowed to chillguard-core's non-test sources.
+        run: make coverage
+
+      - name: Keep the report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-lcov
+          path: target/llvm-cov/lcov.info
+          retention-days: 14
+
+  e2e:
+    # The harness starts a Myrmic runtime on loopback and plays four
+    # scenarios against the real cells (scripts/e2e.sh). It takes about five
+    # minutes and has only been run on developer machines so far, so it is
+    # opt-in here: run the workflow by hand with the `e2e` input set.
+    name: end-to-end (manual)
+    if: github.event_name == 'workflow_dispatch' && inputs.e2e
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the pinned toolchain
+        run: |
+          rustup toolchain install "$TOOLCHAIN" --profile minimal \
+            --component cargo,rust-src \
+            --target wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: wasm
+
+      - name: Install the Myrmic CLI
+        run: |
+          set -euo pipefail
+          base="https://github.com/peeriot/myrmic/releases/download/myrmic/v${MYRMIC_VERSION}"
+          deb="myrmic-cli_${MYRMIC_VERSION}_amd64.deb"
+          dir="$(mktemp -d)"
+          curl -fsSL --retry 5 -o "$dir/$deb" "$base/$deb"
+          echo "${MYRMIC_DEB_SHA256}  $dir/$deb" | sha256sum -c -
+          sudo apt-get install -y "$dir/$deb"
+
+      - name: Build the cells and the CLI, run the scenarios
+        run: make e2e

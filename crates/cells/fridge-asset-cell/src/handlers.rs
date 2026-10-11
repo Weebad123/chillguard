@@ -9,7 +9,7 @@
 #![allow(unsafe_code)]
 
 use chillguard_core::asset::{AssetState, StatusUpdate};
-use chillguard_core::risk::{RejectReason, TemperatureReading, Timestamp};
+use chillguard_core::risk::{RejectReason, RiskError, TemperatureReading, Timestamp};
 use chillguard_protocol::commands::{GetStatus, SetLimits};
 use chillguard_protocol::events::{ReadingAccepted, ReadingObserved, StatusChanged};
 use chillguard_protocol::responses::StatusSnapshot;
@@ -58,13 +58,12 @@ fn decode<T: Payload>(command: &str, payload: &[u8]) -> Result<Option<T>> {
 /// on every restart.
 #[myrmic_sdk::init]
 fn init(md: Metadata, init: AssetInit) -> Result {
-    let fresh = match AssetState::new(init.config) {
-        Ok(fresh) => fresh,
-        Err(error) => {
-            myrmic_sdk::error!("init refused reason=\"{error}\"")?;
-            return Err("invalid refrigerator configuration");
-        }
-    };
+    if let Err(reason) = init.validate() {
+        myrmic_sdk::error!("init refused reason=\"{reason}\"")?;
+        return Err(reason);
+    }
+    // Cannot fail: `validate` ran the same checks.
+    let fresh = AssetState::new(init.config).map_err(RiskError::as_str)?;
     // State survives restarts and redeployments. What is stored for this
     // refrigerator wins over the init payload: its configuration may have
     // been changed by `set_limits`, and a restart must not undo that.

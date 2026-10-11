@@ -140,7 +140,10 @@ fn table(headers: &[&str], rows: &[Vec<String>]) -> String {
         let mut text = String::new();
         for (cell, width) in cells.zip(&widths) {
             text.push_str(cell);
-            text.extend(std::iter::repeat_n(' ', width - cell.chars().count() + 2));
+            // `width` is the widest cell of the column, so this cannot go
+            // below two; saturating keeps that a fact and not an assumption.
+            let padding = width.saturating_sub(cell.chars().count()).saturating_add(2);
+            text.extend(std::iter::repeat_n(' ', padding));
         }
         text.trim_end().to_string()
     };

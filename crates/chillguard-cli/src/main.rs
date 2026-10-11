@@ -1,6 +1,6 @@
 //! `chillguard`: the ChillGuard operator interface. See the library docs.
 
-use std::io::ErrorKind;
+use std::io::{ErrorKind, Write};
 use std::process::ExitCode;
 
 use chillguard_cli::Error;
@@ -17,7 +17,8 @@ fn main() -> ExitCode {
         // The reader went away (`chillguard watch | head`): not a failure.
         Err(Error::Output(error)) if error.kind() == ErrorKind::BrokenPipe => ExitCode::SUCCESS,
         Err(error) => {
-            eprintln!("error: {error}");
+            // Unlike `eprintln!`, a closed stderr is not a reason to panic.
+            let _ = writeln!(std::io::stderr(), "error: {error}");
             ExitCode::FAILURE
         }
     }

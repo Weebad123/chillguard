@@ -286,7 +286,12 @@ fn decode(received: &ReceivedEvent) -> Option<WatchEvent> {
         match Envelope::<T>::decode(&received.payload_bytes()) {
             Ok(envelope) => Some(envelope.body),
             Err(error) => {
-                eprintln!("warning: skipped a `{}` event: {error}", received.name);
+                // A closed stderr must not stop the watch; the line is dropped.
+                let _ = writeln!(
+                    std::io::stderr(),
+                    "warning: skipped a `{}` event: {error}",
+                    received.name
+                );
                 None
             }
         }

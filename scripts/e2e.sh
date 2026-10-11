@@ -46,6 +46,9 @@ for file in config/e2e/*.json; do
 done
 sed "s/E2E_PORT/${port}/" config/e2e/runtime.yml > "${CONFIG_DIR}/runtime.yml"
 export CONFIG_DIR
+# The e2e payloads are the dev profile (config/e2e/<cell>.dev.json): the
+# harness drives the sensor with `simulate`, which only dev mode accepts.
+export PROFILE=dev
 export DEPLOY_TAG="$runtime"
 export MYRMIC_TIMEOUT="$timeout"
 
@@ -441,7 +444,7 @@ chillguard="target/debug/chillguard"
 for cell in "${CELLS[@]}"; do
     wasm="$(wasm_path "$cell")"
     [[ -f "$wasm" ]] || { echo "error: $wasm not found; run 'make build-cells' first" >&2; exit 1; }
-    stale="$(find crates -name '*.rs' -not -path 'crates/chillguard-cli/*' -not -path '*/tests/*' -not -name tests.rs -newer "$wasm" -print -quit)"
+    stale="$(stale_source "$cell" "$wasm")"
     [[ -z "$stale" ]] || { echo "error: $wasm is older than $stale; run 'make build-cells' first" >&2; exit 1; }
 done
 

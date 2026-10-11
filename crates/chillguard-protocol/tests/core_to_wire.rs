@@ -5,7 +5,7 @@
 // The project standard exempts tests from the unwrap/expect ban (clippy.toml),
 // but clippy only recognises `#[test]` functions, not the helpers of an
 // integration test file.
-#![allow(clippy::expect_used, clippy::unwrap_used)]
+#![allow(clippy::expect_used, clippy::unwrap_used, clippy::indexing_slicing)]
 
 mod common;
 

@@ -134,8 +134,7 @@ make stop       # `chillguard stop`
 `chillguard start` starts a Myrmic runtime of its own that keeps everything
 in memory and stays off the network, deploys the four cells with the `dev`
 payloads (a simulated refrigerator on a 60x clock), waits until the
-dashboard shows the refrigerator, prints its address,
-<http://localhost:8642/chillguard/>, and opens it in your browser. Press a
+dashboard shows the refrigerator, prints its address on localhost, and opens it in your browser. Press a
 scenario button on the page and watch a power failure play out in under
 three minutes. `chillguard stop` stops the runtime; nothing is kept.
 
@@ -153,6 +152,7 @@ and deploy the cells with the production payloads:
 myrmic runtimes start config/runtime.local.yml --name chillguard --detached
 export MYRMIC_CONNECT=tcp/127.0.0.1:20123
 make deploy             # PROFILE=prod: real-time sensor, 10 s interval, dev commands refused
+export PATH="$PWD/target/debug:$PATH"
 chillguard status
 ```
 
@@ -186,8 +186,7 @@ their stored state (see [Limitations](#limitations)).
 [docs/operations.md](docs/operations.md) covers every command and option,
 the log lines, telemetry, and what to do when something looks wrong.
 [config/README.md](config/README.md) describes the runtime configuration
-and the deployment profiles. [docs/security.md](docs/security.md) says who
-can reach what and how to limit it.
+and the deployment profiles.
 
 ## Dashboard
 
@@ -206,8 +205,7 @@ export MYRMIC_CONNECT=tcp/127.0.0.1:20123
 make deploy PROFILE=dev          # or plain `make deploy` for a view-only page
 ```
 
-Open <http://localhost:8080/chillguard/>, or `http://<this host>:8080/chillguard/`
-from a phone on the same network. With `PROFILE=dev`, press
+Open <http://localhost:8080/chillguard/>. With `PROFILE=dev`, press
 **Power failure, 2 h** and watch the card go to `Warning` after about a
 minute and a half and `Critical` a minute later, with the exposure counting
 and the incident appearing in the table; it is the demo below, driven from
@@ -219,18 +217,14 @@ What to know before using it:
   login. A view-only deployment (`prod`) shows readings and incidents to
   whoever can reach port 8080 and accepts nothing. `PROFILE=dev` turns on
   `dev_controls`, and with it the gateway accepts commands for *any* cell
-  over HTTP. Use `dev` on a machine or network you control;
-  [docs/security.md](docs/security.md#the-gateway) has the details and how
-  to tunnel instead.
+  over HTTP. Use `dev` on a machine or network you control.
 - **The page shows what the cells last answered.** The dashboard cell asks
   every `refresh_ms` (2 s under `dev`, 30 s under `prod`). A card whose
   cell has stopped answering says `No answer` instead of keeping its last
   value, and the page says `Not updating` when it cannot reach the gateway.
 - **It is a view.** Acknowledging incidents and changing limits stay with
   `chillguard`. Deleting the dashboard cell loses nothing.
-- **It costs disk space while it runs**: Myrmic's file store never deletes
-  content, and every refresh writes a new status snapshot
-  (see [Limitations](#limitations)). Leave the cell out with
+- **It costs disk space while it runs** Leave the cell out with
   `scripts/deploy.sh sensor-cell fridge-asset-cell risk-monitor-cell` if
   nobody will look at the page.
 
@@ -321,9 +315,7 @@ exposure includes the outage and `has_data_gap` is set. This is the
 | `make e2e` | `scripts/e2e.sh`: a throwaway runtime with its swarm side on loopback, the four cells, six scenarios (normal, excursion, stale, restart, dashboard, playground) driven and checked through the operator CLI, with the cell logs as evidence. `dashboard` fetches the page and the served answers through the gateway and starts a scenario the way the page's buttons do; `playground` runs `chillguard start` and `stop` for real. | 6 min |
 
 [docs/acceptance.md](docs/acceptance.md) maps each acceptance criterion to
-the tests that cover it. The GitHub workflow
-([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs everything but
-`e2e` on every push and pull request; `e2e` is a manual job.
+the tests that cover it. 
 
 ## Project layout
 
@@ -344,9 +336,7 @@ docs/
   playground/README.md     try ChillGuard: `make start`, what to press, what you will see
   architecture.md          the proposal and the acceptance criteria
   acceptance.md            criteria mapped to code and tests
-  security.md              threat model, validation, access limits, known gaps
   operations.md            the CLI, logs, telemetry, troubleshooting
-  myrmic-notes.md          what was verified about Myrmic 0.7.0, with sources
   decisions/               0001 core vs cells, 0002 toolchain, 0003 risk policies, 0004 wire contract, 0005 state ownership, 0006 web dashboard
 .github/workflows/ci.yml   the quality gates
 deny.toml                  licence and advisory policy
@@ -386,49 +376,21 @@ is known to be missing.
 
 - One refrigerator per deployment, one node. The second refrigerator and
   the second node of the architecture are not built.
-- No notifications. The CLI, the dashboard and the logs are the interface,
-  and the dashboard only shows: it cannot acknowledge or change limits.
 - The dashboard has no login and its gateway listens on every interface;
   with `dev_controls` the gateway accepts commands for any cell
   ([docs/security.md](docs/security.md#the-gateway)).
-- The dashboard costs disk space for as long as its cell runs. Myrmic's blob
-  store never deletes content, so every status snapshot written for the page
-  stays on the node: about 0.8 KiB each, which is 2.3 MiB a day at the
-  `prod` refresh of 30 s and 35 MiB a day at the `dev` refresh of 2 s. (On
-  disk, over four minutes, the database grew by about 7.7 kB per refresh;
-  how much of that compaction gives back was not followed up.) The incident
-  list is only written when it changes.
 - A standalone `myrmic gateway` did not reach a runtime that has multicast
   off; the dashboard needs the gateway embedded in the runtime
   (`config/runtime.dashboard.yml`).
 - No physical sensor. The sensor cell plays a model.
-- No authentication inside the swarm. Anyone who can reach the runtime's
-  network can publish readings, change limits or acknowledge incidents.
-  Access is limited at the network boundary and, optionally, with mutual
-  TLS between nodes; see [docs/security.md](docs/security.md).
-- The asset cell's status is an event-fed view and can miss a change
-  (docs/decisions/0005). `chillguard status` shows the monitor's incident
-  beside it and a note when the two disagree; `get_status` alone cannot
-  tell.
 - A reading with a timestamp far in the future makes every later reading
   `out_of_order` until real time catches up; nothing detects a stepped
-  clock (policy 3 in docs/decisions/0003).
+  clock.
 - The incident table and the optional time-series history grow without
   bound; `get_incidents` returns at most the newest 100 and there is no
   paging or expiry.
 - Events travel the whole network. Two deployments that name the same
   refrigerator feed each other's readings; give each its own
   `refrigerator_id` and `SRN_PREFIX`.
-- `State::load()` was twice seen to return nothing for a few seconds while
-  other runtimes were on the network, cause unknown (docs/myrmic-notes.md,
-  section 13). The loopback-only runtime configuration avoids the
-  conditions; it is not a fix.
-- The end-to-end suite runs on developer machines; it is a manual job in
-  CI and has not been run on a hosted runner yet.
 - Mutual TLS is documented from Myrmic's security page and has not been
   exercised in this project.
-
-## Licence
-
-No licence has been chosen yet; until one is added the code is all rights
-reserved. Dependencies are limited to permissive licences by `deny.toml`.

@@ -1,10 +1,6 @@
 # Operating ChillGuard
 
-How to run the operator CLI, read what the cells log, and look at the
-runtime's telemetry. Everything here was run against Myrmic 0.7.0 on
-2026-10-10; where the Myrmic observability guide
-(<https://book.myrmic.dev/docs/guides/observability>) and what was observed
-differ, this says so.
+
 
 Contents: [the operator CLI](#the-operator-cli) ·
 [the playground](#the-playground) ·
@@ -109,7 +105,7 @@ is what it does, for whoever has to explain it.
    without all four.
 2. Asks `myrmic runtimes <name> info` whether the playground's runtime
    (`chillguard-play`, or `--name`) is running. If not: checks that the
-   dashboard's port (`--port`, 8642) and the runtime's loopback port
+   dashboard's port (`--port`, 8642 or different port) and the runtime's loopback port
    (`--swarm-port`, 20124) are free, writes a runtime configuration with
    multicast off, a loopback listener and an embedded gateway, and starts it
    with `myrmic runtimes start <file> --name <name> --tmp --detached`.
@@ -138,24 +134,6 @@ Where things are:
 | The cells' state, the incidents | In the runtime's memory (`--tmp`). Gone with `stop`, a reboot, or a kill. |
 | The other commands' way in | `export MYRMIC_CONNECT=tcp/127.0.0.1:20124`, no `--prefix` |
 
-Things that were observed:
-
-- **A computer that sleeps loses the cells, not the runtime.** After the
-  machine had been suspended for an hour the runtime logged
-  `hygiene: cleaning up after dead cell(s) cells=4` and
-  `fencing: killing cell ... why=SelfSuperseded`, and the page answered
-  `404 myrmic gateway: no application is mounted at this path`. The runtime
-  itself kept running, with its memory. `chillguard start` then found it,
-  deployed the four cells again, and they resumed from their state
-  (`resumed=true`, the earlier incident still listed).
-- **A taken port is not reported by the runtime.** A runtime whose gateway
-  port is in use starts, logs nothing about it and serves nothing, which is
-  why `start` checks both ports first.
-- **The dashboard's port is open to the network** (docs/security.md, "the
-  gateway"), and the playground has the page's scenario buttons on, so
-  anyone who can reach the port can send commands to the playground's
-  cells. They are a simulated refrigerator in a runtime that no other
-  runtime can join; that is the whole of what is exposed.
 
 ## The web dashboard
 

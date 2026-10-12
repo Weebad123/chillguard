@@ -58,7 +58,6 @@ flowchart TB
     ASSET_B -. "Status queries / updates" .-> DASH
 ```
 
-**Build order:** start with Node 1 and one refrigerator. Add the second node only after the first node's state updates and alerts work reliably.
 
 ## 3. Cell responsibilities
 
@@ -111,7 +110,7 @@ flowchart TB
 5. **Presentation:** Dashboard or CLI reads state and displays current status and incident history.
 6. **Optional distribution:** Multiple nodes exchange messages through the Myrmic runtime's supported distributed messaging mechanisms.
 
-The arrows describe intended application behavior. Confirm the exact handler, message, and query APIs against the installed Myrmic SDK; do not assume these are built-in APIs with these exact names.
+The arrows describe intended application behavior. 
 
 ## 5. State model
 
@@ -162,11 +161,10 @@ stateDiagram-v2
     SensorStale --> Warning: Valid reading resumes out of range
 ```
 
-Define the exact transition rules in code and tests. A single in-range reading may not be enough to establish that stored contents are safe; ChillGuard should record the observed recovery without claiming that affected food or medicine is safe.
+ChillGuard should record the observed recovery without claiming that affected food or medicine is safe.
 
 ## 7. Myrmic infrastructure considerations
 
-Use only capabilities supported by the version being developed against.
 
 - **Runtime and CLI:** launch, configure, inspect, and debug the application.
 - **Cells and messaging:** keep sensor, asset state, and risk evaluation responsibilities separated where this fits Myrmic's documented model.
@@ -175,14 +173,11 @@ Use only capabilities supported by the version being developed against.
 - **Security and isolation:** validate inputs and limit access to control operations.
 - **Observability:** log readings, state transitions, alerts, and errors with timestamps and refrigerator identifiers.
 
-Do not assume that local persistence automatically replicates state or guarantees recovery after a host failure. Test restart and failure behavior explicitly.
 
 ## 8. MVP scope and acceptance criteria
 
 ### Required
 
-Met in v0.1.0; docs/acceptance.md maps each item to the code and the tests
-that satisfy it, and lists what is still open.
 
 - [x] One simulated refrigerator.
 - [x] Timestamped readings at a configurable interval.
@@ -194,30 +189,4 @@ that satisfy it, and lists what is still open.
 - [x] Automated tests for normal, warming, critical, recovery, stale-reading, and restart scenarios.
 - [x] README with setup, run, and demo instructions.
 
-### Next Phase after the MVP
-- [ ] Second refrigerator and second Myrmic node.
-- [x] Web dashboard (docs/decisions/0006-web-dashboard.md).
-- [ ] Physical temperature sensor integration.
-- [ ] Notifications through an external service.
-- [ ] More advanced persistence and failure recovery.
 
-## 9. Suggested build sequence
-
-1. Complete the official Myrmic Quickstart and confirm the installed version.
-2. Find the documented patterns for defining Cells, handling messages, managing state, and exposing status.
-3. Implement a single sensor simulator and verify its readings.
-4. Implement the Refrigerator Asset Cell and test state updates.
-5. Implement risk evaluation and incident transitions as deterministic logic.
-6. Connect the Cells using the documented Myrmic messaging APIs.
-7. Add CLI output or a minimal dashboard.
-8. Test normal operation, excursion, escalation, recovery, stale readings, and restart behavior.
-9. Only then add a second node or real hardware.
-
-## 10. Official references
-
-- Myrmic book overview: <https://book.myrmic.dev/docs/overview>
-- Myrmic Quickstart: <https://book.myrmic.dev/docs/quickstart>
-- Myrmic Smart Greenhouse tutorial: <https://book.myrmic.dev/docs/tutorials/smart-greenhouse>
-
-
-**Implementation principle:** this document is the proposed ChillGuard application architecture. It is not a claim that every named Cell, dashboard, sensor integration, or recovery behavior is built into Myrmic. Verify SDK names and runtime guarantees against the current documentation and source code.

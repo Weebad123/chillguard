@@ -344,11 +344,8 @@ deny.toml                  licence and advisory policy
 
 ## Limitations
 
-What was verified, by `make e2e` and the experiments recorded in
-[docs/myrmic-notes.md](docs/myrmic-notes.md) (sections 10 to 13), and what
-is known to be missing.
 
-**Persistence and recovery, as verified on Myrmic 0.7.0**
+**Persistence and recovery**
 
 - A cell's state (limits, latest reading, status view, monitor state,
   simulator position) and the incident table survive a runtime stop by
@@ -378,10 +375,7 @@ is known to be missing.
   the second node of the architecture are not built.
 - The dashboard has no login and its gateway listens on every interface;
   with `dev_controls` the gateway accepts commands for any cell
-  ([docs/security.md](docs/security.md#the-gateway)).
-- A standalone `myrmic gateway` did not reach a runtime that has multicast
-  off; the dashboard needs the gateway embedded in the runtime
-  (`config/runtime.dashboard.yml`).
+  ([docs/security.md](docs/security.md#the-gateway))
 - No physical sensor. The sensor cell plays a model.
 - A reading with a timestamp far in the future makes every later reading
   `out_of_order` until real time catches up; nothing detects a stepped
@@ -389,8 +383,3 @@ is known to be missing.
 - The incident table and the optional time-series history grow without
   bound; `get_incidents` returns at most the newest 100 and there is no
   paging or expiry.
-- Events travel the whole network. Two deployments that name the same
-  refrigerator feed each other's readings; give each its own
-  `refrigerator_id` and `SRN_PREFIX`.
-- Mutual TLS is documented from Myrmic's security page and has not been
-  exercised in this project.

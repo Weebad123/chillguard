@@ -8,7 +8,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use chillguard_cli::cli::{Cli, Command, Global, SetLimits, Settings};
+use chillguard_cli::cli::{Cli, Command, Global, SetLimits, Settings, Start};
 use chillguard_cli::run::merge_limits;
 use chillguard_core::risk::{RefrigeratorConfig, RefrigeratorId};
 use chillguard_protocol::commands::ScenarioPreset;
@@ -240,6 +240,88 @@ fn what_cannot_be_meant_is_rejected() {
 }
 
 #[test]
+fn start_and_stop_parse() {
+    struct Case {
+        line: &'static str,
+        expected: Command,
+    }
+    let cases = [
+        Case {
+            line: "chillguard start",
+            expected: Command::Start(Start::default()),
+        },
+        Case {
+            line: "chillguard start --port 9000 --no-open --cells ./built --swarm-port 21000 --name demo-2",
+            expected: Command::Start(Start {
+                port: Some(9000),
+                no_open: true,
+                cells: Some(PathBuf::from("./built")),
+                swarm_port: Some(21000),
+                name: Some("demo-2".to_string()),
+            }),
+        },
+        Case {
+            line: "chillguard stop",
+            expected: Command::Stop {
+                name: "chillguard-play".to_string(),
+            },
+        },
+        Case {
+            line: "chillguard stop --name demo-2",
+            expected: Command::Stop {
+                name: "demo-2".to_string(),
+            },
+        },
+    ];
+    for case in cases {
+        assert_eq!(command(case.line), case.expected, "{}", case.line);
+    }
+}
+
+#[test]
+fn start_and_stop_reject_ports_and_names_they_cannot_use() {
+    struct Case {
+        line: &'static str,
+        says: &'static str,
+    }
+    let cases = [
+        Case {
+            line: "chillguard start --port 80",
+            says: "80 is not in 1024..=65535",
+        },
+        Case {
+            line: "chillguard start --port 70000",
+            says: "70000 is not in 1024..=65535",
+        },
+        Case {
+            line: "chillguard start --swarm-port http",
+            says: "invalid value 'http'",
+        },
+        Case {
+            line: "chillguard start --name ../elsewhere",
+            says: "lower-case letters, digits",
+        },
+        Case {
+            line: "chillguard stop --name Play",
+            says: "lower-case letters, digits",
+        },
+        Case {
+            line: "chillguard stop --name",
+            says: "a value is required",
+        },
+    ];
+    for case in cases {
+        let message = rejected(case.line);
+        assert!(
+            message.contains(case.says),
+            "`{}` was rejected with:\n{message}\nexpected it to mention: {}",
+            case.line,
+            case.says
+        );
+    }
+}
+
+#[test]
 fn global_options_work_before_and_after_the_command() {
     let expected = Global {
         prefix: Some("site-a-".to_string()),
@@ -293,6 +375,7 @@ fn settings_prefer_the_command_line_then_the_environment_then_defaults() {
     assert_eq!(settings.myrmic, PathBuf::from("myrmic"));
     assert_eq!(settings.timeout, Duration::from_secs(10));
     assert!(!settings.json);
+    assert_eq!(settings.home, std::env::temp_dir().join("chillguard"));
     // An empty variable is no setting.
     assert_eq!(Settings::resolve(&bare, empty), settings);
 
@@ -312,6 +395,25 @@ fn settings_prefer_the_command_line_then_the_environment_then_defaults() {
     assert_eq!(settings.connect.as_deref(), Some("tcp/127.0.0.1:2"));
     assert_eq!(settings.myrmic, PathBuf::from("./m"));
     assert!(settings.json);
+}
+
+#[test]
+fn playground_files_go_under_the_xdg_data_directory() {
+    let bare = parse("chillguard start").unwrap().global;
+    let home_only = |name: &str| (name == "HOME").then(|| "/home/ada".to_string());
+    assert_eq!(
+        Settings::resolve(&bare, home_only).home,
+        PathBuf::from("/home/ada/.local/share/chillguard")
+    );
+    let both = |name: &str| match name {
+        "HOME" => Some("/home/ada".to_string()),
+        "XDG_DATA_HOME" => Some("/data".to_string()),
+        _ => None,
+    };
+    assert_eq!(
+        Settings::resolve(&bare, both).home,
+        PathBuf::from("/data/chillguard")
+    );
 }
 
 #[test]

@@ -12,6 +12,9 @@ use chillguard_protocol::responses::{IncidentList, StatusSnapshot};
 use chillguard_protocol::{Kind, Payload, Severity};
 use serde_json::{Value, json};
 
+use crate::cli::DEFAULT_PLAYGROUND;
+use crate::playground::Playground;
+
 /// What `status` shows: the asset cell's snapshot and, from the risk monitor
 /// cell, the incident in progress.
 #[derive(Debug, Clone, PartialEq)]
@@ -438,6 +441,81 @@ pub fn simulate(target: &str, preset: ScenarioPreset, seed: u64) -> String {
 #[must_use]
 pub fn simulate_json(target: &str, preset: ScenarioPreset, seed: u64) -> Value {
     json!({ "sent": true, "target": target, "preset": preset.as_str(), "seed": seed })
+}
+
+// ---------------------------------------------------------------------------
+// start, stop
+// ---------------------------------------------------------------------------
+
+/// `start`, as text: where the dashboard is, what to do next, how to stop.
+#[must_use]
+pub fn playground(playground: &Playground) -> String {
+    let Playground {
+        runtime,
+        url,
+        connect,
+        already_running,
+    } = playground;
+    let headline = if *already_running {
+        "The ChillGuard playground was already running."
+    } else {
+        "The ChillGuard playground is running."
+    };
+    let stop = if runtime == DEFAULT_PLAYGROUND {
+        "chillguard stop".to_string()
+    } else {
+        format!("chillguard stop --name {runtime}")
+    };
+    format!(
+        "{headline}\n\
+         \n\
+         \x20 dashboard  {url}\n\
+         \x20 runtime    {runtime} (in memory: nothing is kept once it stops)\n\
+         \x20 endpoint   {connect}\n\
+         \n\
+         On the page, press a button under \"Development controls\" and watch the card.\n\
+         From a terminal, the same refrigerator:\n\
+         \n\
+         \x20 export MYRMIC_CONNECT={connect}\n\
+         \x20 chillguard status\n\
+         \x20 chillguard simulate power_failure_2h\n\
+         \n\
+         Stop it with `{stop}`. The guide is docs/playground/README.md.\n\
+         \n\
+         Note: the dashboard's port is open to other machines on this network, and its\n\
+         buttons work without a login. It is a simulated refrigerator; stop it when done."
+    )
+}
+
+/// `start --json`.
+#[must_use]
+pub fn playground_json(playground: &Playground) -> Value {
+    json!({
+        "running": true,
+        "already_running": playground.already_running,
+        "url": playground.url,
+        "runtime": playground.runtime,
+        "connect": playground.connect,
+    })
+}
+
+/// `stop`, as text.
+#[must_use]
+pub fn stopped(runtime: &str, was_running: bool) -> String {
+    if was_running {
+        format!(
+            "The ChillGuard playground has stopped (runtime {runtime}). \
+             What it held was in memory and is gone."
+        )
+    } else {
+        format!("No ChillGuard playground was running (runtime {runtime}).")
+    }
+}
+
+/// `stop --json`.
+#[must_use]
+pub fn stopped_json(runtime: &str, was_running: bool) -> Value {
+    json!({ "running": false, "was_running": was_running, "runtime": runtime })
 }
 
 // ---------------------------------------------------------------------------

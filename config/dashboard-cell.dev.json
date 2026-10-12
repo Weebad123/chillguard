@@ -1,0 +1,7 @@
+{
+  "refrigerators": [
+    { "sensor": "sensor-cell", "asset": "fridge-asset-cell", "monitor": "risk-monitor-cell" }
+  ],
+  "refresh_ms": 2000,
+  "dev_controls": true
+}

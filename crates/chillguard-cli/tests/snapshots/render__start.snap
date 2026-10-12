@@ -1,0 +1,21 @@
+---
+source: crates/chillguard-cli/tests/render.rs
+expression: "render::playground(&started)"
+---
+The ChillGuard playground is running.
+
+  dashboard  http://localhost:8642/chillguard/
+  runtime    chillguard-play (in memory: nothing is kept once it stops)
+  endpoint   tcp/127.0.0.1:20124
+
+On the page, press a button under "Development controls" and watch the card.
+From a terminal, the same refrigerator:
+
+  export MYRMIC_CONNECT=tcp/127.0.0.1:20124
+  chillguard status
+  chillguard simulate power_failure_2h
+
+Stop it with `chillguard stop`. The guide is docs/playground/README.md.
+
+Note: the dashboard's port is open to other machines on this network, and its
+buttons work without a login. It is a simulated refrigerator; stop it when done.

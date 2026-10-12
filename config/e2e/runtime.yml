@@ -2,8 +2,11 @@
 # but off the shared network. Multicast scouting is disabled and the runtime
 # listens on loopback only, so other runtimes on the machine or LAN neither
 # find it nor receive its events, and the CLI reaches it with
-# `--connect tcp/127.0.0.1:<port>`. The harness writes a copy with E2E_PORT
-# replaced by a port of its own.
+# `--connect tcp/127.0.0.1:<port>`. The embedded gateway serves the dashboard
+# for the `dashboard` scenario; it listens on every interface (it has no
+# setting for that), which is why the harness deploys the dashboard cell
+# without the message API except where it tests it. The harness writes a
+# copy with E2E_PORT and E2E_GATEWAY_PORT replaced by ports of its own.
 execution:
   tags: [e2e]
 
@@ -18,3 +21,6 @@ zenoh:
       enabled: false
   listen:
     endpoints: ["tcp/127.0.0.1:E2E_PORT"]
+
+gateway:
+  port: E2E_GATEWAY_PORT

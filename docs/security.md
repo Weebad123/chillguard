@@ -10,6 +10,7 @@ Contents: [what is at stake](#what-is-at-stake) ·
 [trust boundary](#trust-boundary) · [entry points](#entry-points) ·
 [what every inbound message goes through](#what-every-inbound-message-goes-through) ·
 [development-only commands](#development-only-commands) ·
+[the gateway](#the-gateway) ·
 [limiting access to control commands](#limiting-access-to-control-commands) ·
 [data at rest and in logs](#data-at-rest-and-in-logs) ·
 [supply chain](#supply-chain) · [known gaps](#known-gaps) ·
@@ -83,6 +84,8 @@ and what someone on the segment could do with it.
 | `set_limits` | command | asset | `RefrigeratorConfig::validate` and the same refrigerator id; a change is logged and takes effect on the next reading | **Alarms can be silenced** by raising the limits or the critical duration, or made noisy. The change is persistent and survives restarts. |
 | `acknowledge` | command | monitor | the incident must exist; the first acknowledgement stands | An incident is marked as seen by nobody. The incident itself is not changed. |
 | `simulate_scenario` | command | sensor | **refused unless the cell was deployed with `dev_mode: true`**; the refusal is logged | With dev mode on: the simulated sensor is driven to any preset, which is what the demo does. |
+| `status_snapshot`, `incident_list` | command | dashboard | the sender must be one of the cells named in the dashboard's init payload, by SRI; then validated on decode | The sender is not proven (see the trust boundary), so a party on the segment that forges it can put a false snapshot or incident list on the web page until the next real answer replaces it. Nothing in the other cells changes. |
+| HTTP on the gateway's port | `GET` | the gateway | none: no login | Read access to the page, the status and the incidents, from wherever the port can be reached. With `dev_controls`, also `POST`: see [the gateway](#the-gateway). |
 | init payload (`--init-file`) | deploy | each cell | unknown fields refused, content validated, see [config/README.md](../config/README.md) | Deploying is as powerful as it sounds: anyone who can deploy can replace a cell (docs/myrmic-notes.md, section 10). |
 
 Timer ticks (`tick` in the sensor and monitor cells) are commands the runtime
@@ -147,12 +150,70 @@ The deployment profiles in `config/` follow that: `make deploy` uses the
 (`time_scale`) is also refused unless dev mode is on, so a production sensor
 cannot be deployed with a compressed clock by mistake.
 
+## The gateway
+
+The web dashboard is served by a Myrmic gateway, and the gateway is a second
+way in, with its own reach. What follows was observed on Myrmic 0.7.0
+(docs/myrmic-notes.md, section 16).
+
+- **It listens on every interface.** The gateway embedded in the runtime
+  (`gateway:` in `config/runtime.dashboard.yml`) binds `[::]:<port>` and has
+  no setting for the address, also when the swarm side of the same runtime
+  listens on loopback only. Whoever can reach the host on that port can load
+  the page. There is no login; the gateway's OIDC support
+  (`myrmic gateway --routing`) belongs to the standalone gateway and was not
+  exercised.
+- **Without `dev_controls` the dashboard is read-only by construction.** The
+  dashboard cell mounts static files and nothing else. The gateway then has
+  no path that carries a message into the swarm (`GET /chillguard/api`
+  answers 404 and a `POST` 405; the `dashboard` scenario of `make e2e`
+  asserts the first). What is
+  exposed is what the page shows: the refrigerator's id, status, last
+  reading, limits and incidents. None of it is confidential in itself; a
+  site that disagrees should not start a gateway.
+- **With `dev_controls: true` the gateway accepts messages over HTTP, and
+  not only for the dashboard.** The page needs the gateway's message API to
+  send `simulate_scenario`. That API is not limited to the cell that mounts
+  it: with it mounted, an HTTP client sent `acknowledge` to the risk
+  monitor and `get_status` to the asset cell, and published an event of its
+  choosing. So `dev_controls` gives everyone who can reach the port
+  everything the table under [entry points](#entry-points) lists, including
+  `set_limits` and forged readings, without the Myrmic CLI. It is for a
+  development machine or a closed demo network. `dev_controls` defaults to
+  `false`, the `prod` profile leaves it out, and only
+  `make deploy PROFILE=dev` turns it on; that profile's sensor accepts
+  `simulate_scenario` anyway, which is the point of it.
+- **The page trusts no value it shows as markup.** Identifiers and numbers
+  from the swarm are written as text nodes; the page loads nothing from
+  another origin and stores nothing.
+- **A page that looks healthy when it is not** is the failure to avoid (item
+  1 of [what is at stake](#what-is-at-stake)). The dashboard cell removes
+  the stored answer of a cell that has left three refreshes unanswered, and
+  the page shows `No answer` for a missing one. The page also compares each
+  status snapshot's `as_of` with the gateway's clock, from the response's
+  `Date` header and not from the phone's own clock, and refuses to present
+  an old one as current. `chillguard status` remains the reference.
+
+**The playground** (`chillguard start`) is the `dev` profile on a runtime
+of its own: `dev_controls` on, gateway on every interface. What that
+exposes is the playground itself, a simulated refrigerator held in memory
+by a runtime that has multicast off and listens for other nodes on loopback
+only; it cannot be used to reach another deployment. `start` says so when it
+prints the address. Stop it when you are done, and do not run it on a
+network where a stranger pressing "Power failure" would matter.
+
+To serve the page without opening the port to a network: keep the host's
+firewall closed for the port and reach it through an SSH tunnel
+(`ssh -L 8080:127.0.0.1:8080 <host>`), or put a reverse proxy that
+authenticates in front of it.
+
 ## Limiting access to control commands
 
 `set_limits`, `acknowledge` and `simulate_scenario` change what the system
 does or records, and `get_status` and `get_incidents` read it. None of them
 can tell one caller from another. Per Myrmic's security page the controls
-are at the transport, and they apply to all five alike:
+are at the transport, and they apply to all five alike. (The gateway is a
+transport of its own; [the section above](#the-gateway) covers it.)
 
 1. **Keep the runtime off any network you do not control.** For a single
    host, `config/runtime.local.yml` disables multicast discovery and listens
@@ -249,7 +310,11 @@ In order of weight.
    time per cell (one handler runs at a time), so a flood delays readings
    behind it. The runtime's fuel metering bounds each handler, not the
    queue.
-6. **A clock step is a blind spot** (policy 3 in 0003): one reading with a
+6. **The dashboard has no login**, and its development controls open the
+   swarm over HTTP. See [the gateway](#the-gateway): view-only deployments
+   expose readings and incidents to whoever reaches the port; `dev_controls`
+   exposes every command.
+7. **A clock step is a blind spot** (policy 3 in 0003): one reading with a
    far-future timestamp, forged or from a broken sensor, makes every later
    real reading `out_of_order` until real time catches up. The only signal
    is the stream of `reading rejected` lines.

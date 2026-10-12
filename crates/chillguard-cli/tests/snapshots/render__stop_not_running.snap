@@ -1,0 +1,5 @@
+---
+source: crates/chillguard-cli/tests/render.rs
+expression: "render::stopped(\"chillguard-play\", false)"
+---
+No ChillGuard playground was running (runtime chillguard-play).

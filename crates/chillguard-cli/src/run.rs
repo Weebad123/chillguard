@@ -15,6 +15,7 @@ use serde_json::Value;
 use crate::cli::{Command, SetLimits, Settings};
 use crate::client::Client;
 use crate::error::Error;
+use crate::playground;
 use crate::render::{self, AckOutcome, OpenIncident, StatusReport, WatchEvent};
 use crate::wire::ReceivedEvent;
 
@@ -84,6 +85,37 @@ pub fn run(command: &Command, settings: &Settings, out: &mut dyn Write) -> Resul
         }
         Command::Watch { readings, duration } => {
             watch(&client, settings, *readings, *duration, out)
+        }
+        Command::Start(args) => {
+            // Starting takes several seconds; the steps go to stderr so
+            // that stdout holds the result alone. A closed stderr must not
+            // stop the start.
+            let mut progress = |step: &str| {
+                let _ = writeln!(std::io::stderr(), "{step}...");
+            };
+            let playground = playground::start(args, settings, &mut progress)?;
+            emit(
+                out,
+                json,
+                &render::playground_json(&playground),
+                &render::playground(&playground),
+            )?;
+            if !args.no_open && !playground::open_browser(&playground.url) {
+                let _ = writeln!(
+                    std::io::stderr(),
+                    "note: no browser could be opened from here; open the address yourself"
+                );
+            }
+            Ok(())
+        }
+        Command::Stop { name } => {
+            let was_running = playground::stop(name, settings)?;
+            emit(
+                out,
+                json,
+                &render::stopped_json(name, was_running),
+                &render::stopped(name, was_running),
+            )
         }
     }
 }

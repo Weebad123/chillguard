@@ -95,6 +95,7 @@ impl Fake {
             timeout,
             json: false,
             myrmic: self.dir.join("myrmic"),
+            home: self.dir.join("home"),
         })
     }
 

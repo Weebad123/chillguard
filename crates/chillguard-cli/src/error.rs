@@ -53,6 +53,9 @@ pub enum Error {
         /// What is wrong with the answer.
         source: ProtocolError,
     },
+    /// `start` or `stop` could not do its work on this machine.
+    #[error("{0}")]
+    Playground(String),
     /// What the operator asked for cannot be sent.
     #[error("{0}")]
     Invalid(String),

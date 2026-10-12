@@ -76,7 +76,7 @@ All `[local]` unless noted. Global flags: `-v/-vv`, `--timeout <dur>` (e.g. `8s`
 | Publish an event | `myrmic publish <event> [json payload] [--raw]` | `myrmic publish set_limit 2.5` decoded into an `f64` handler param. |
 | Subscribe to events | `myrmic subscribe [names...]` | Prints `event=<name> sender=<sri> payload=N bytes` then the JSON. Runs until Ctrl-C. |
 | Remove a cell | `myrmic delete <srn> --cell` (or `--app`, `--branch`, `--children`) | Required before redeploying a changed cell: redeploying a class with live instances is refused. [docs] https://book.myrmic.dev/docs/tutorials/smart-greenhouse/the-mock-sensor |
-| Other subcommands present | `flash`, `monitor`, `database`, `replicate`, `tags`, `gateway`, `cells classes/status/teardown`, `telemetry` | Help text read; not exercised. |
+| Other subcommands present | `flash`, `monitor`, `database`, `replicate`, `tags`, `gateway`, `cells classes/status/teardown`, `telemetry` | Help text read; not exercised here. `database`, `telemetry` and `gateway` since: sections 11, 14 and 16. |
 
 Reference pages: https://book.myrmic.dev/docs/reference/myrmic-cli/new,
 .../myrmic-cli/build, .../myrmic-cli/deploy, .../myrmic-cli/runtimes/start.
@@ -525,7 +525,7 @@ Observed with all three cells on one persistent runtime, playing the simulator's
 
 ## 13. End-to-end harness (2026-10-10) [local]
 
-`scripts/e2e.sh` runs four scenarios against a throwaway runtime with the clock compressed
+`scripts/e2e.sh` runs four scenarios (six since sections 16 and 17) against a throwaway runtime with the clock compressed
 (`config/e2e/`: simulator `time_scale` 60, `critical_after` 5 s, `stale_after` 10 s). What
 it relies on, all observed:
 
@@ -679,10 +679,172 @@ it relies on, all observed:
 ## 15. Open questions / not yet verified
 
 - `app_specs.yml` build/deploy (`classes`/`instances`) is documented but not exercised.
-- Gateway (`myrmic gateway`, `gateway` routes/assets) for a dashboard is documented but not exercised.
 - `find_measurement` was not exercised; buffer sizing for responses is the caller's problem.
-- The reply path of a query from a **cell** (`Callback::to(name)?.invoke(md.sender, &reply)`) has
-  not run yet: every `get_status` and `get_incidents` so far came from the CLI, whose sender is
-  nil and which is answered by an event (section 14).
 - Whether anything can make cells come back by themselves after a runtime restart
   (an `app_specs.yml` deployment, perhaps) is not known. `--policy always` does not.
+- A standalone `myrmic gateway` on a multicast network, the gateway's `--routing` file with OIDC,
+  `--over-https`, and the WebSocket path (`.ws()`) are documented and were not exercised
+  (section 16 covers the embedded gateway, static files and the HTTP message API).
+- Whether the database's on-disk growth from repeated `State::save` is given back by compaction
+  was not measured over a long enough run (section 16 has the short-run numbers).
+
+Closed since: the gateway for a dashboard, and the reply path of a query from a **cell**
+(`Callback::to(name)?.invoke(md.sender, &reply)`), both in section 16.
+
+## 16. Gateway and the dashboard cell (2026-10-12)
+
+Read first: the gateway pages of the book
+(https://book.myrmic.dev/docs/reference/myrmic-cli/gateway,
+.../reference/myrmic-sdk/external-systems/gateway-routes, .../gateway-assets,
+.../reference/myrmic-sdk/state-and-storage/blob-store,
+.../reference/configuration/runtime-configuration) and the two dashboard tutorials
+(.../tutorials/smart-greenhouse/the-dashboard for a page that polls a file a cell rewrites,
+.../tutorials/scaling/the-dashboard for a page that sends commands). Then run with
+`dashboard-cell` beside the three other cells on a loopback-only runtime.
+
+**SDK surface used** [src] `host_functions/gateway.rs`, `db/store.rs`
+
+- `gateway::assets(md.id) -> BlobStore`, the cell's own asset scope
+  (`gw/gateway-assets/<sri>`); `put(path, bytes)`, `get`, `size_of`, `list`, `delete`, `rename`.
+- `gateway::mount("/chillguard").index("/index.html").fallback(Fallback::None).api("/api").bind()`;
+  `.ws(path)`, `.assets()`, `.scope(..)` exist too. Nothing is served until `bind()`. Its error
+  is a `GatewayError`, which converts with `.map_err(<&'static str>::from)`.
+- `gateway::unmount(path)`. Not needed: a cell's routes go with the cell.
+- [docs] Mounting and unmounting join the handler's transaction. A path belongs to the cell that
+  mounted it first; that cell may mount it again, another cell's attempt fails. A cell that uses
+  the gateway does not load on an embedded node.
+
+**Which gateway** [local]
+
+- **Embedded works.** `gateway:\n  port: <p>` in the runtime configuration starts a gateway
+  inside the runtime (`swarm_gateway: gateway listening on [::]:<p>`), and it served the cell's
+  mount at once. The runtime logs `gateway routing table updated: N route(s)` when a cell mounts
+  or goes.
+- **It listens on every interface**, also in a runtime whose swarm side listens on loopback only
+  (`ss -ltn`: `*:<p>`). The section has one key, `port`; there is no bind address.
+- **A standalone `myrmic gateway --connect tcp/127.0.0.1:<port>` did not reach a runtime that has
+  multicast off.** It started and listened, never showed up in `myrmic network status`, logged
+  `route reconcile failed: unable to list gateway routes: ... no connected databases` every
+  15 s, and answered every path with `404 myrmic gateway: no application is mounted at this
+  path`. Same with the flag before the subcommand. Not tried: a standalone gateway on a
+  multicast network, which is what the tutorials run.
+
+**What the gateway answers** [local], cell mounted at `/chillguard` with `Fallback::None`
+
+| Request | Answer |
+|---|---|
+| `GET /chillguard/`, `/chillguard/index.html` | `200`, `content-type: text/html` |
+| `GET /chillguard` | `307`, `location: /chillguard/` |
+| `GET /chillguard/config.json` | `200`, `application/json` (the type follows the extension) |
+| `GET /chillguard/<no such file>` | `404 not found` (with the default `Fallback::Spa` an extensionless path gets the index instead [docs]) |
+| `GET /` or any path outside a mount | `404 myrmic gateway: no application is mounted at this path` |
+| any of them after `myrmic delete <cell> --cell` | `404`: route and files go with the cell, at once |
+
+Responses carry `content-length` and `date` and no caching headers. [docs] Writing to a path
+replaces what the gateway serves; the route does not need registering again.
+
+**The HTTP message API** (`.api("/api")`) [local]
+
+- `GET /chillguard/api` is a `text/event-stream`. Its first message is
+  `data: {"type":"ready","session":"<uuid>"}`. The session lives while the stream is open and is
+  listed by `myrmic cells` as a row without a name.
+- `POST /chillguard/api` with the header `X-Gateway-Session: <uuid>` and the body
+  `{"type":"command","sri":"<srn or sri>","name":"<command>","payload":"<base64 of the payload>"}`
+  answers `202` with no body. The cell sees `md.sender` = the session.
+  `{"type":"event","name":..,"payload":..}` publishes an event, also `202`.
+- Without the header: `401 missing or malformed X-Gateway-Session header`. To a name that is not
+  deployed: `502 {"type":"error","message":"cell '<sri>' has no placement"}`.
+- A command a cell sends to the session arrives on the stream as
+  `data: {"type":"command","sri":"<the cell>","name":"<name>","payload":"<base64>"}`. The asset
+  cell's answer to a `get_status` posted this way came back like that.
+- Without `.api()` in the mount, `GET /chillguard/api` is a `404` and a `POST` a `405`.
+- **The API path is not limited to the cell that mounts it.** Through the dashboard cell's mount
+  an HTTP client sent `acknowledge` to the risk monitor, `get_status` to the asset cell and
+  `simulate_scenario` to the sensor, and published an event under a name of its choice. One
+  cell mounting `.api()` opens every command of every cell, and every event, to whoever can
+  reach the gateway's port. The dashboard cell mounts it only with `dev_controls`
+  (docs/security.md).
+
+**Queries between cells** (closes an open question) [local]
+
+- The dashboard cell sends `get_status` and `get_incidents` with `myrmic_sdk::send`; the asset
+  and the monitor see its SRI as `md.sender` and answer with
+  `Callback::to(reply_to)?.invoke(md.sender, &answer)` (`... via=command` in their logs). The
+  answer arrives as a command of that name; the asset logged its first one 14 ms after the
+  dashboard's init.
+- **A command from a cell to a cell that is not deployed is kept, not refused.** `send` returns
+  `Ok` and nothing is logged (the CLI, by contrast, fails with `has no placement`). When the
+  asset cell was deployed again after 24 s, the twelve `get_status` the dashboard had sent in
+  the meantime were all delivered within 60 ms of its init. A poller that asks on every tick
+  queues one command per tick for as long as its target is away; the dashboard cell asks a cell
+  again only once it has answered (`routes.rs`), which left exactly one.
+
+**The blob store keeps everything** [docs] + [local]
+
+- [docs] "Nothing ever deletes stored content. Once its last path is gone it cannot be reached
+  any more, and it stays on the node." Deleting or replacing a path changes only the name.
+- [local] It does not store equal content once, either. A handler that wrote one of three fixed
+  strings to the same path every 2 s left 2, then 9, then 15 copies of each in
+  `myrmic database export gw/gateway-assets/<sri>` over 80 s. Five deployments of the dashboard
+  cell left five copies of its page there.
+- [local] Cost of the tutorials' pattern (rewrite a JSON file on every update), from the size of
+  that export: a 328-byte status snapshot adds about 0.8 KiB, for good. Writing both answers
+  every 2 s added about 80 KiB a minute; writing the snapshot alone, 24 KiB a minute.
+- [local] On disk the short-run cost is ten times that. `du` of the runtime's `db` folder over
+  240 s each, e2e payloads at one reading a second: 3.5 kB/s with the three cells alone,
+  7.4 kB/s with the dashboard cell writing one snapshot every 2 s, so about 7.7 kB per refresh.
+  A refresh is four commands (two queries, two answers) and one file; most of the difference is
+  presumably journal that compaction gives back, but no compaction was seen in these minutes
+  (the folder only grew, from 2.5 MiB to 17 MiB in 35 minutes of experiments).
+- Consequences for the dashboard cell: it writes an answer only when it says something new (the
+  incident list changes rarely; the status snapshot with every reading, and its `as_of` is the
+  page's sign of life), the refresh period is part of the init payload, and the cost is stated
+  in config/README.md. The alternative without storage is the message API, with what that opens.
+
+**Smaller facts** [local]
+
+- A 15.6 KB page baked in with `include_bytes!` builds and runs with
+  `heap_size = 65_536`, `initial_memory = max_memory = 262_144` (the tutorial's values); the
+  binary is 228 KB. `BlobStore::put` hands the bytes to the host by reference.
+- `static X: InMemory<Vec<T>> = InMemory::new(Vec::new())` holds a cell's working state across
+  handlers of one incarnation; `with` hands out `&mut`.
+- The page was checked in headless Chromium at 390 px and 1100 px wide (no horizontal overflow,
+  no console errors) against the live gateway, including a click on a scenario button.
+
+## 17. The playground: `chillguard start` (2026-10-12) [local]
+
+What `crates/chillguard-cli/src/playground.rs` relies on, each observed.
+
+- `myrmic runtimes start <config.yml> --name <n> --tmp --detached` takes a configuration file
+  and `--tmp` together: the file's `zenoh` and `gateway` sections apply and the database is in
+  memory (`runtimes <n> info` then says `db ... (missing)`). The command returns once the
+  daemon is forked and does not hold a pipe it was given.
+- `myrmic runtimes <n> info`: exit 0 with a line `status    running (pid N)` or
+  `status    stopped`; exit 1 with `ERROR no runtime "<n>" recorded (never started on this
+  machine?)` for a name it has never seen. `runtimes start` under a name that is running:
+  exit 1, `ERROR runtime "<n>" already running (pid N)`. `runtimes delete <n>` when nothing of
+  that name runs: exit 1, `ERROR no runtime "<n>" found in <pid directory>`.
+- The pid directory is `$XDG_RUNTIME_DIR/myrmic`, shared by every runtime of the user whatever
+  `XDG_DATA_HOME` says: `myrmic runtimes list` showed another session's test runtime.
+- `myrmic deploy <wasm> --name <srn> --init '<json>'` takes the payload inline. A failed
+  deployment puts its reason on `Caused by:` lines after `ERROR unable to deploy cell`
+  (`application '<srn>' is already deployed`, or `... Cell init error: <the cell's message>`).
+- Four deployments took 4 to 5 s, a whole `chillguard start` 4 s to 12 s.
+- **A gateway port that is taken is not an error.** A second runtime configured with the
+  gateway port of a running one started, reported `status running`, and logged nothing about
+  the gateway. Check the port before starting.
+- **There is no gateway bind address.** The binary's configuration type for the section has
+  one element (`struct GatewayConf with 1 element`, from `strings`), which is `port`; the
+  embedded gateway listens on `*:<port>` (section 16).
+- **A suspended machine loses the cells and keeps the runtime.** The machine this ran on was
+  frozen for an hour with a playground up. On resume the runtime logged
+  `sorg_orchestration::supervision: hygiene: cleaning up after dead cell(s) cells=4`, then
+  `fencing: killing cell sri=... why=SelfSuperseded` for each cell, and the gateway
+  `ignoring route for absent cell ... (mount /chillguard)`. `myrmic cells --once`: `No cells
+  registered`; `runtimes <n> info`: still `running`. Deploying the cells again worked and they
+  found their state (`resumed=true`), in memory as it was. Nothing brought them back by
+  itself. Presumably the cells' leases ran out during the jump of the clock; a production
+  host that suspends would need the same redeploy (`make deploy`).
+- A stale cell binary shows up as `Cell init error: failed to deserialize json` when its
+  payload shape has changed since it was built; `scripts/deploy.sh` guards against that and
+  `chillguard start` only hints at it (`make start` rebuilds first).

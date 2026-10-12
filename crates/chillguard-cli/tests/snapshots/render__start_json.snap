@@ -1,0 +1,11 @@
+---
+source: crates/chillguard-cli/tests/render.rs
+expression: "pretty(&render::playground_json(&started))"
+---
+{
+  "running": true,
+  "already_running": false,
+  "url": "http://localhost:8642/chillguard/",
+  "runtime": "chillguard-play",
+  "connect": "tcp/127.0.0.1:20124"
+}

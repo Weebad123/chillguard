@@ -1,0 +1,36 @@
+# Myrmic runtime configuration for one host that also serves the web
+# dashboard: config/runtime.local.yml plus an embedded gateway.
+#
+#   myrmic runtimes start config/runtime.dashboard.yml --name chillguard --detached
+#   export MYRMIC_CONNECT=tcp/127.0.0.1:20123
+#   make deploy                      # or PROFILE=dev for the page's scenario buttons
+#   open http://localhost:8080/chillguard/
+#
+# The swarm side is as in runtime.local.yml: no multicast, loopback only. The
+# gateway is different: it listens on every interface of the host and has no
+# setting to narrow that, so the page is reachable from the network the host
+# is on (which is how a phone gets to it). What that exposes depends on the
+# dashboard cell's `dev_controls`: off, files to read and nothing else; on,
+# an HTTP way to send any command to any cell. Read docs/security.md, "the
+# gateway", before starting this on a network you do not control.
+#
+# The gateway is embedded because a separate `myrmic gateway --connect ...`
+# did not reach a runtime that has multicast off (docs/myrmic-notes.md,
+# section 16).
+execution:
+  tags: [site-a]
+
+telemetry:
+  logs:
+    format: COMPACT
+    env_filter: "info"
+
+zenoh:
+  scouting:
+    multicast:
+      enabled: false
+  listen:
+    endpoints: ["tcp/127.0.0.1:20123"]
+
+gateway:
+  port: 8080

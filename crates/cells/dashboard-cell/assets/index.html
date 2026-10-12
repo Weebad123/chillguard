@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>ChillGuard</title>
+<link rel="icon" href="data:,">
+<style>
+:root {
+  --bg: #f3f5f7; --card: #fff; --text: #1b1f24; --muted: #59636e; --line: #d4dae0;
+  --normal: #1a7f37; --warning: #9a6700; --critical: #cf222e; --stale: #59636e;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1114; --card: #191e23; --text: #e6e9ec; --muted: #9aa4ae; --line: #2f363d;
+    --normal: #3fb950; --warning: #d29922; --critical: #f85149; --stale: #9aa4ae;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; padding: 1rem; background: var(--bg); color: var(--text);
+  font: 1rem/1.45 system-ui, sans-serif; -webkit-text-size-adjust: 100%; }
+main, header, footer { max-width: 64rem; margin: 0 auto; }
+header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 1rem; }
+h1 { font-size: 1.4rem; margin: 0; }
+h2 { font-size: 1.1rem; margin: 1.75rem 0 0.5rem; }
+h3 { font-size: 1.05rem; margin: 0; overflow-wrap: anywhere; }
+.muted, footer { color: var(--muted); font-size: 0.9rem; }
+#conn.bad, .note { color: var(--critical); }
+.note { margin: 0.5rem 0 0; font-size: 0.9rem; }
+
+.cards { display: grid; gap: 1rem; margin-top: 1rem;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 18rem), 1fr)); }
+.card, .scenario, table { background: var(--card); border: 1px solid var(--line); border-radius: 8px; }
+.card { padding: 1rem; border-left: 6px solid var(--state, var(--line)); }
+.card > div { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; }
+.normal { --state: var(--normal); }
+.warning { --state: var(--warning); }
+.critical { --state: var(--critical); }
+.sensor_stale, .silent { --state: var(--stale); }
+.badge { flex: none; padding: 0.1rem 0.6rem; border-radius: 1rem; font-size: 0.85rem; font-weight: 600;
+  white-space: nowrap;
+  color: var(--state, var(--muted)); border: 1px solid currentColor; }
+td .badge { padding: 0 0.5rem; justify-self: start; }
+.temp { margin: 0.5rem 0 0; font-size: 2.6rem; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.warning .temp, .critical .temp { color: var(--state); }
+dl { display: grid; grid-template-columns: auto 1fr; gap: 0.3rem 0.75rem; margin: 0.75rem 0 0; }
+dt { color: var(--muted); }
+dd { margin: 0; overflow-wrap: anywhere; }
+
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+th, td { padding: 0.5rem 0.75rem; text-align: left; vertical-align: top; border-top: 1px solid var(--line); }
+thead th { border-top: 0; color: var(--muted); font-weight: 600; font-size: 0.9rem; }
+/* Whole words: a time or a temperature is not broken to make a column fit. */
+td { overflow-wrap: break-word; }
+/* Seven columns need a wide window. On a phone, a tablet or a narrow window
+   each incident becomes a block instead. */
+@media (max-width: 60rem) {
+  thead { position: absolute; left: -999rem; }
+  tr { display: block; padding: 0.5rem 0; border-top: 1px solid var(--line); }
+  tbody tr:first-child { border-top: 0; }
+  td { display: grid; grid-template-columns: 7.5rem minmax(0, 1fr); gap: 0.75rem; padding: 0.15rem 0.75rem; border: 0;
+    overflow-wrap: anywhere; }
+  td::before { content: attr(data-label); color: var(--muted); }
+  td[colspan] { display: block; }
+  td[colspan]::before { content: none; }
+}
+
+.scenario { margin: 0.5rem 0 0; padding: 0.5rem 0.75rem 0.75rem; display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.scenario legend { padding: 0 0.25rem; overflow-wrap: anywhere; }
+button { flex: 1 1 12rem; min-height: 2.75rem; padding: 0.4rem 0.75rem; font: inherit; color: inherit;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 6px; }
+button:not(:disabled) { cursor: pointer; }
+button:disabled { color: var(--muted); }
+footer { margin-top: 2rem; }
+</style>
+</head>
+<body>
+<header>
+  <h1>ChillGuard</h1>
+  <span id="conn" class="muted" role="status">Connecting…</span>
+</header>
+<main>
+  <section id="cards" class="cards" aria-label="Refrigerators"></section>
+
+  <section aria-labelledby="history">
+    <h2 id="history">Incident history</h2>
+    <table>
+      <thead><tr id="columns"></tr></thead>
+      <tbody id="incidents"></tbody>
+    </table>
+    <p id="history-note" class="muted"></p>
+  </section>
+
+  <section id="dev" aria-labelledby="dev-title" hidden>
+    <h2 id="dev-title">Development controls</h2>
+    <p class="muted">Restart a simulated sensor on one of its scenarios. This deployment plays them faster than the clock.</p>
+    <div id="scenarios"></div>
+    <p id="dev-note" class="muted" role="status">Connecting…</p>
+  </section>
+</main>
+<footer>
+  ChillGuard reports temperatures it observed. A recovered incident means the measured temperature
+  came back into range; it does not mean that anything stored in the refrigerator is safe.
+</footer>
+
+<script>
+'use strict';
+// Everything is read from files the dashboard cell keeps beside this page:
+// config.json, and per refrigerator status/<n>.json (the asset cell's answer
+// to get_status) and incidents/<n>.json (the risk monitor's answer to
+// get_incidents), each a ChillGuard envelope {"v": 1, "body": {...}}.
+// status/<n>.json is rewritten on every refresh; incidents/<n>.json when the
+// incidents changed. The cell removes the file of a cell that stopped
+// answering, so a missing file means "no answer".
+const SCHEMA_VERSION = 1;
+const STATUS = { normal: 'Normal', warning: 'Warning', critical: 'Critical', sensor_stale: 'Sensor stale' };
+const SEVERITY = { warning: 'Warning', critical: 'Critical' };
+const PRESETS = [
+  ['normal_day', 'Normal day'],
+  ['short_door_open', 'Door open, 5 min'],
+  ['power_failure_2h', 'Power failure, 2 h'],
+];
+const COLUMNS = ['Started', 'Refrigerator', 'Severity', 'Exposure', 'Range', 'Recovered', 'Acknowledged'];
+
+// The page is served at the mount root, with or without the file name.
+const base = location.pathname.replace(/[^/]*$/, '');
+const $ = (id) => document.getElementById(id);
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Values from the swarm only ever become text nodes, never markup.
+function el(tag, props, ...children) {
+  const node = Object.assign(document.createElement(tag), props);
+  node.append(...children.filter((child) => child != null));
+  return node;
+}
+
+const temp = (c) => `${c.toFixed(1)} °C`;
+
+function duration(ms) {
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${s} s`;
+  if (s < 3600) return `${Math.floor(s / 60)} min ${s % 60} s`;
+  if (s < 86400) return `${Math.floor(s / 3600)} h ${Math.floor((s % 3600) / 60)} min`;
+  return `${Math.floor(s / 86400)} d ${Math.floor((s % 86400) / 3600)} h`;
+}
+
+// Today's times without the date; the full timestamp is in the tooltip.
+function time(ms) {
+  const date = new Date(ms);
+  const today = date.toDateString() === new Date().toDateString();
+  return el('time', { dateTime: date.toISOString(), title: date.toISOString() },
+    today ? date.toLocaleTimeString() : date.toLocaleString());
+}
+
+// A stored file and when the gateway served it. The age of an answer is
+// taken from the gateway's clock, not this device's: a phone's clock may be
+// off, and an answer that looks fresh when it is not is the worst mistake
+// this page can make.
+async function get(path) {
+  const response = await fetch(base + path, { cache: 'no-store' });
+  if (response.status === 404) return null; // no answer stored yet
+  if (!response.ok) throw new Error(`${path}: HTTP ${response.status}`);
+  const served = Date.parse(response.headers.get('date')) || Date.now();
+  return { content: await response.json(), served };
+}
+
+// A cell's answer, with how long ago the cell gave it.
+async function answer(path) {
+  const file = await get(path);
+  if (file === null) return null;
+  const { v, body } = file.content;
+  if (v !== SCHEMA_VERSION) throw new Error(`${path}: schema version ${v}`);
+  return Object.assign(body, { age: file.served - body.as_of });
+}
+
+// The refrigerators' names, kept for when a card has no answer to name it.
+const names = [];
+
+function card(i, status, list, config) {
+  if (!status) {
+    return el('article', { className: 'card silent' },
+      el('div', {}, el('h3', {}, names[i] || `Refrigerator ${i + 1}`), el('span', { className: 'badge' }, 'No answer')),
+      el('p', { className: 'note' }, 'The asset cell is not answering. The state of this refrigerator is unknown.'));
+  }
+  names[i] = status.refrigerator_id;
+  // The snapshot is renewed on every refresh. One that is not has outlived
+  // the dashboard cell that should have replaced or removed it.
+  const stale = status.age > Math.max(4 * config.refresh_ms, 15000);
+  const open = list ? list.incidents.find((incident) => incident.recovered_at === null) : undefined;
+  const reading = status.last_reading;
+  const { lower_limit_c: lower, upper_limit_c: upper, critical_after: criticalAfter } = status.config;
+
+  let exposure = 'none';
+  let alert = 'none';
+  if (!list) {
+    exposure = alert = 'unknown: the risk monitor is not answering';
+  } else if (open) {
+    exposure = duration(open.exposure);
+    if (open.has_data_gap) exposure += ', includes a gap in the readings';
+    if (open.severity === 'warning') exposure += ` (critical after ${duration(criticalAfter)})`;
+    const acknowledged = list.acknowledgements.find((ack) => ack.incident_id === open.incident_id);
+    alert = el('span', {},
+      `${SEVERITY[open.severity] || open.severity} since `, time(open.started_at),
+      `, ${temp(open.lowest_temperature_c)} to ${temp(open.highest_temperature_c)}, `,
+      acknowledged ? 'acknowledged ' : 'not acknowledged',
+      acknowledged ? time(acknowledged.acknowledged_at) : null);
+  }
+
+  const note = stale
+    ? `This snapshot is ${duration(status.age)} old and is not being renewed. It is not the current state.` : null;
+
+  return el('article', { className: `card ${stale ? 'silent' : status.status}` },
+    el('div', {},
+      el('h3', {}, status.refrigerator_id),
+      el('span', { className: 'badge' }, stale ? 'No answer' : STATUS[status.status] || status.status)),
+    el('p', { className: 'temp' }, reading ? temp(reading.temperature_c) : '–'),
+    el('dl', {},
+      el('dt', {}, 'Reading'),
+      el('dd', {}, reading ? `${duration(status.as_of - reading.observed_at)} before the snapshot at ` : 'none yet',
+        reading ? time(status.as_of) : null),
+      el('dt', {}, 'Range'),
+      el('dd', {}, lower == null ? `up to ${temp(upper)}` : `${temp(lower)} to ${temp(upper)}`),
+      el('dt', {}, 'Exposure'), el('dd', {}, exposure),
+      el('dt', {}, 'Active alert'), el('dd', {}, alert)),
+    note && el('p', { className: 'note' }, note));
+}
+
+function incidentRow(incident, acknowledgedAt) {
+  const cells = [
+    time(incident.started_at),
+    incident.refrigerator_id,
+    el('span', { className: `badge ${incident.severity}` }, SEVERITY[incident.severity] || incident.severity),
+    duration(incident.exposure) + (incident.has_data_gap ? ', with a gap' : ''),
+    `${temp(incident.lowest_temperature_c)} to ${temp(incident.highest_temperature_c)}`,
+    incident.recovered_at === null ? 'open'
+      : el('span', {}, time(incident.recovered_at), ` at ${temp(incident.recovery_temperature_c)}`),
+    acknowledgedAt == null ? 'no' : time(acknowledgedAt),
+  ];
+  return el('tr', {}, ...cells.map((cell, i) => {
+    const td = el('td', {}, cell);
+    td.dataset.label = COLUMNS[i];
+    return td;
+  }));
+}
+
+function render(config, statuses, lists) {
+  $('cards').replaceChildren(...statuses.map((status, i) => card(i, status, lists[i], config)));
+
+  const rows = [];
+  for (const list of lists) {
+    if (!list) continue;
+    const acknowledged = new Map(list.acknowledgements.map((ack) => [ack.incident_id, ack.acknowledged_at]));
+    for (const incident of list.incidents) rows.push([incident, acknowledged.get(incident.incident_id)]);
+  }
+  rows.sort(([a], [b]) => b.started_at - a.started_at);
+  $('incidents').replaceChildren(...(rows.length
+    ? rows.map(([incident, acknowledgedAt]) => incidentRow(incident, acknowledgedAt))
+    : [el('tr', {}, el('td', { colSpan: COLUMNS.length, className: 'muted' },
+        lists.some(Boolean) ? 'No incidents recorded.' : 'The risk monitor is not answering.'))]));
+  const notes = [];
+  if (rows.length && !lists.every(Boolean)) notes.push('A risk monitor is not answering; its incidents are missing here.');
+  if (lists.some((list) => list && list.truncated)) notes.push('Older incidents exist; only the newest of each refrigerator are shown.');
+  $('history-note').textContent = notes.join(' ');
+
+  // The controls are named after the refrigerator once its name is known.
+  names.forEach((name, i) => {
+    const legend = document.querySelector(`#scenarios fieldset:nth-child(${i + 1}) legend`);
+    if (legend && name) legend.textContent = name;
+  });
+}
+
+// ---- development controls: commands through the gateway's message API ----
+// GET <mount>/api opens a session whose first message carries its id; a
+// command is a POST with that id and the payload as base64.
+let stream = null;
+let session = null;
+let sensors = null;
+
+function controls(config) {
+  $('dev').hidden = !config.dev_controls;
+  if (!config.dev_controls) {
+    if (stream) stream.close();
+    stream = session = sensors = null;
+    return;
+  }
+  // A stream the gateway refused does not reconnect by itself.
+  if (!stream || stream.readyState === EventSource.CLOSED) {
+    stream = new EventSource(base + 'api');
+    stream.onmessage = (event) => {
+      const message = JSON.parse(event.data);
+      if (message.type === 'ready') setSession(message.session, 'Ready.');
+    };
+    stream.onerror = () => setSession(null, 'No connection to the gateway; reconnecting.');
+  }
+  if (sensors !== config.sensors.join()) {
+    sensors = config.sensors.join();
+    $('scenarios').replaceChildren(...config.sensors.map((sensor) =>
+      el('fieldset', { className: 'scenario' }, el('legend', {}, sensor),
+        ...PRESETS.map(([preset, label]) =>
+          el('button', { type: 'button', disabled: !session, onclick: () => simulate(sensor, preset) }, label)))));
+  }
+}
+
+function setSession(id, note) {
+  session = id;
+  $('dev-note').textContent = note;
+  for (const button of document.querySelectorAll('#scenarios button')) button.disabled = !session;
+}
+
+async function simulate(sensor, preset) {
+  const command = { v: SCHEMA_VERSION, body: { preset } };
+  try {
+    const response = await fetch(base + 'api', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Gateway-Session': session },
+      body: JSON.stringify({ type: 'command', sri: sensor, name: 'simulate_scenario', payload: btoa(JSON.stringify(command)) }),
+    });
+    $('dev-note').textContent = response.ok
+      ? `Sent ${preset} to ${sensor}. The sensor does not answer: watch the card.`
+      : `${preset} was not sent: ${await response.text()}`;
+  } catch (error) {
+    $('dev-note').textContent = `${preset} was not sent: ${error.message}`;
+  }
+}
+
+async function refresh() {
+  const file = await get('config.json');
+  if (file === null) throw new Error('the dashboard cell is not deployed');
+  const config = file.content;
+  const indexes = Array.from({ length: config.refrigerators }, (_, i) => i);
+  const [statuses, lists] = await Promise.all([
+    Promise.all(indexes.map((i) => answer(`status/${i}.json`))),
+    Promise.all(indexes.map((i) => answer(`incidents/${i}.json`))),
+  ]);
+  controls(config);
+  render(config, statuses, lists);
+  return config.refresh_ms;
+}
+
+async function main() {
+  $('columns').replaceChildren(...COLUMNS.map((name) => el('th', { scope: 'col' }, name)));
+  let wait = 2000;
+  for (;;) {
+    // A page nobody is looking at does not poll.
+    if (!document.hidden) {
+      try {
+        wait = await refresh();
+        $('conn').className = 'muted';
+        $('conn').textContent = `Updated ${new Date().toLocaleTimeString()}`;
+      } catch (error) {
+        $('conn').className = 'bad';
+        $('conn').textContent = `Not updating: ${error.message}. Retrying.`;
+      }
+    }
+    await sleep(wait);
+  }
+}
+main();
+</script>
+</body>
+</html>

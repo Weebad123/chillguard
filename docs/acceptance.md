@@ -14,7 +14,7 @@ is named; "e2e" is a scenario of `scripts/e2e.sh`.
 | 4 | Correct excursion-duration tracking | met, with the documented policy for gaps |
 | 5 | Warning and critical alerts with duplicate suppression | met |
 | 6 | Recovery event and incident history | met; history is per node, see gaps |
-| 7 | CLI or simple dashboard showing state | met (CLI; no dashboard) |
+| 7 | CLI or simple dashboard showing state | met (CLI; a web dashboard was added after v0.1.0) |
 | 8 | Automated tests for normal, warming, critical, recovery, stale-reading, and restart scenarios | met |
 | 9 | README with setup, run, and demo instructions | met |
 
@@ -31,7 +31,7 @@ is named; "e2e" is a scenario of `scripts/e2e.sh`.
   `presets_have_the_documented_shape` (`src/simulator.rs`);
   `presets_end_in_the_expected_status_with_the_expected_incidents`
   (`tests/simulator_presets.rs`) plays every preset through the risk rules.
-  Live: every e2e scenario runs the three cells for one refrigerator.
+  Live: every e2e scenario runs the cells for one refrigerator.
 
 ## 2. Timestamped readings at a configurable interval
 
@@ -136,7 +136,15 @@ is named; "e2e" is a scenario of `scripts/e2e.sh`.
   Live: every e2e assertion that reads state goes through
   `chillguard --json status` and `--json incidents`; `simulate`,
   `set-limits` and `ack` are exercised too.
-- **Gap.** No web dashboard; architecture.md lists it under the next phase.
+- **Since v0.1.0.** A web dashboard (`crates/cells/dashboard-cell`, served
+  through a Myrmic gateway; docs/decisions/0006-web-dashboard.md). It shows
+  state and, in development deployments, starts the simulator's scenarios;
+  it does not acknowledge or change limits. Tests: the cell's unit tests
+  (init payload, which cell is asked when, what counts as a changed
+  answer), and the e2e `dashboard` scenario, which fetches the page and the
+  served answers through the gateway and posts a `simulate_scenario` the
+  way the page's buttons do. The page's own rendering was checked by hand
+  in headless Chromium at phone and desktop widths, not by a test.
 
 ## 8. Automated tests for the six scenarios
 

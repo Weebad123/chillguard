@@ -89,6 +89,54 @@ pub enum Command {
         #[arg(long = "for", value_name = "DURATION", value_parser = parse_duration)]
         duration: Option<Duration>,
     },
+    /// Start a playground on this machine and open its web dashboard.
+    ///
+    /// Starts a throwaway Myrmic runtime that keeps everything in memory,
+    /// deploys the four cells with the development settings (a simulated
+    /// refrigerator on a 60x clock) and serves the dashboard on this
+    /// machine, at localhost:8642/chillguard/ unless --port says otherwise.
+    /// Running it again while the playground is up prints the address
+    /// again. Needs the cells built (make build-cells); make start does
+    /// both. Guide: docs/playground/README.md.
+    Start(Start),
+    /// Stop the playground that `start` started. What it held is gone.
+    Stop {
+        /// Name of the playground's runtime, if `start` was given one.
+        #[arg(long, value_name = "NAME", default_value = DEFAULT_PLAYGROUND, value_parser = parse_runtime_name)]
+        name: String,
+    },
+}
+
+/// The name of the playground's runtime unless `--name` says otherwise.
+pub const DEFAULT_PLAYGROUND: &str = "chillguard-play";
+/// The dashboard's port unless `--port` says otherwise.
+pub const DEFAULT_DASHBOARD_PORT: u16 = 8642;
+/// The playground runtime's loopback port unless `--swarm-port` says
+/// otherwise. One above the port of config/runtime.local.yml, so that a
+/// playground and a deployment made from that file can run side by side.
+pub const DEFAULT_SWARM_PORT: u16 = 20124;
+
+/// What `start` can be told. Nothing is required.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Args)]
+pub struct Start {
+    /// Port the dashboard is served on. [default: 8642]
+    #[arg(long, value_name = "PORT", value_parser = clap::value_parser!(u16).range(1024..))]
+    pub port: Option<u16>,
+    /// Do not open the dashboard in a browser; only print its address.
+    #[arg(long)]
+    pub no_open: bool,
+    /// Directory holding the built cells (sensor_cell.wasm and the others).
+    /// [default: target/wasm32-unknown-unknown/release, where make
+    /// build-cells puts them]
+    #[arg(long, value_name = "DIR")]
+    pub cells: Option<PathBuf>,
+    /// Loopback port of the playground's runtime, the one MYRMIC_CONNECT
+    /// names. [default: 20124]
+    #[arg(long, value_name = "PORT", value_parser = clap::value_parser!(u16).range(1024..))]
+    pub swarm_port: Option<u16>,
+    /// Name of the playground's runtime. [default: chillguard-play]
+    #[arg(long, value_name = "NAME", value_parser = parse_runtime_name)]
+    pub name: Option<String>,
 }
 
 /// The settings `set-limits` can change. At least one must be given.
@@ -139,6 +187,26 @@ fn parse_duration(text: &str) -> Result<Duration, String> {
     Ok(duration)
 }
 
+/// Accepts a runtime name: lower-case letters, digits, dots, dashes and
+/// underscores, starting with a letter or digit. The name becomes a
+/// directory name, so nothing that could leave the directory is let through.
+fn parse_runtime_name(text: &str) -> Result<String, String> {
+    let allowed = |c: char| c.is_ascii_lowercase() || c.is_ascii_digit() || "._-".contains(c);
+    let starts_well = text
+        .chars()
+        .next()
+        .is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit());
+    if starts_well && text.len() <= 64 && text.chars().all(allowed) {
+        Ok(text.to_string())
+    } else {
+        Err(
+            "must be at most 64 lower-case letters, digits, `.`, `-` or `_`, \
+             starting with a letter or digit"
+                .to_string(),
+        )
+    }
+}
+
 /// Parses a preset by its wire name; dashes are accepted for underscores.
 fn parse_preset(text: &str) -> Result<ScenarioPreset, String> {
     let name = text.replace('-', "_");
@@ -165,6 +233,8 @@ pub struct Settings {
     pub json: bool,
     /// The Myrmic CLI to run.
     pub myrmic: PathBuf,
+    /// Where `start` keeps the playground's runtime configuration.
+    pub home: PathBuf,
 }
 
 impl Settings {
@@ -174,6 +244,11 @@ impl Settings {
     /// environment.
     pub fn resolve(global: &Global, env: impl Fn(&str) -> Option<String>) -> Self {
         let non_empty = |name: &str| env(name).filter(|value| !value.is_empty());
+        // The XDG data directory, as the Myrmic CLI uses for its own files.
+        let data = non_empty("XDG_DATA_HOME")
+            .map(PathBuf::from)
+            .or_else(|| non_empty("HOME").map(|home| PathBuf::from(home).join(".local/share")))
+            .unwrap_or_else(std::env::temp_dir);
         Self {
             prefix: global
                 .prefix
@@ -191,6 +266,7 @@ impl Settings {
                 .clone()
                 .or_else(|| non_empty("MYRMIC_BIN").map(PathBuf::from))
                 .unwrap_or_else(|| PathBuf::from("myrmic")),
+            home: data.join("chillguard"),
         }
     }
 

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# End-to-end test harness: a throwaway Myrmic runtime, all three cells, and
-# the simulator's scenarios played at 60x (config/e2e/).
+# End-to-end test harness: a throwaway Myrmic runtime, every cell, and the
+# simulator's scenarios played at 60x (config/e2e/).
 #
 # Usage: scripts/e2e.sh [scenario...]       (run `make build-cells` first)
-#   scenarios: normal excursion stale restart        (default: all)
+#   scenarios: normal excursion stale restart dashboard playground    (default: all)
 #
 # Every scenario deploys the cells under its own SRN prefix, so each starts
 # from empty state, and deletes them when it is done. The runtime keeps a
@@ -23,6 +23,11 @@
 # The cells also get a refrigerator_id unique to this run, written into
 # copies of config/e2e/, so that even a shared network could not feed them
 # another run's readings.
+#
+# The runtime's embedded gateway serves the web dashboard on a port of this
+# run. Unlike the swarm side it listens on every interface, so the dashboard
+# cell is deployed without the gateway's message API (`dev_controls`) except
+# for the part of the `dashboard` scenario that tests it.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -37,14 +42,18 @@ export XDG_DATA_HOME
 fridge="fridge-${run_id}"
 port=$(( 20000 + $$ % 10000 ))
 export MYRMIC_CONNECT="tcp/127.0.0.1:${port}"
-# config/e2e/*.json name the refrigerator `fridge-e2e` and runtime.yml a port
-# `E2E_PORT`; this run's copies name both after the run.
+gateway_port=$(( 30000 + $$ % 10000 ))
+dashboard_url="http://127.0.0.1:${gateway_port}/chillguard"
+# config/e2e/*.json name the refrigerator `fridge-e2e` and runtime.yml the
+# ports `E2E_PORT` and `E2E_GATEWAY_PORT`; this run's copies name them after
+# the run. The dashboard's payload is written per scenario (dashboard_config).
 CONFIG_DIR="${XDG_DATA_HOME}/config"
 mkdir -p "$CONFIG_DIR"
 for file in config/e2e/*.json; do
     sed "s/\"fridge-e2e\"/\"${fridge}\"/" "$file" > "${CONFIG_DIR}/$(basename "$file")"
 done
-sed "s/E2E_PORT/${port}/" config/e2e/runtime.yml > "${CONFIG_DIR}/runtime.yml"
+sed -e "s/E2E_PORT/${port}/" -e "s/E2E_GATEWAY_PORT/${gateway_port}/" \
+    config/e2e/runtime.yml > "${CONFIG_DIR}/runtime.yml"
 export CONFIG_DIR
 # The e2e payloads are the dev profile (config/e2e/<cell>.dev.json): the
 # harness drives the sensor with `simulate`, which only dev mode accepts.
@@ -63,6 +72,7 @@ stale_after_ms=10000
 scenario=""               # the scenario being run, for messages and SRNs
 scenario_since=""         # when it began; log lines before it belong to another
 runtime_started=false     # nothing to tear down until start_runtime ran
+playground=""             # the runtime `chillguard start` made, while it is up
 failures=0
 
 # ---------------------------------------------------------------------------
@@ -107,6 +117,9 @@ cleanup() {
     # Stdout may be gone (a pipe that closed early); the cleanup must not
     # die on its own output.
     exec >&2
+    if [[ -n "$playground" ]]; then
+        "$chillguard" stop --name "$playground" >/dev/null 2>&1 || true
+    fi
     if [[ "$runtime_started" == true ]]; then
         say "==> tearing down"
         for cell in "${CELLS[@]}"; do
@@ -165,9 +178,19 @@ cell_started() {
     cell_log | grep -q -- "$1 started"
 }
 
+# Writes the dashboard cell's payload for the current scenario: it names the
+# other cells, whose names carry the scenario's prefix.
+#
+# Usage: dashboard_config <dev_controls: true|false>
+dashboard_config() {
+    sed -e "s/E2E_PREFIX/${SRN_PREFIX}/g" -e "s/\"dev_controls\": false/\"dev_controls\": $1/" \
+        config/e2e/dashboard-cell.dev.json > "${CONFIG_DIR}/dashboard-cell.dev.json"
+}
+
 # Deploys the cells under the scenario's prefix and waits for their inits.
 deploy_cells() {
     export SRN_PREFIX="${run_id}-${scenario}-"
+    dashboard_config false
     quiet scripts/deploy.sh || { fail "deploy failed (see the error above)"; return 1; }
     for cell in "${CELLS[@]}"; do
         wait_for 20 "${cell} to start" cell_started "$cell" || fail "${cell} did not start"
@@ -227,6 +250,61 @@ status_is() {
     local snapshot
     snapshot="$(get_status)" || return 1
     [[ "$(json "$snapshot" 'b["snapshot"]["status"]')" == "$1" ]]
+}
+
+# ---------------------------------------------------------------------------
+# The web dashboard, through the runtime's embedded gateway.
+# ---------------------------------------------------------------------------
+
+# Prints the HTTP status of a request; `000` when nothing answered.
+http_code() {
+    curl -s -o /dev/null -m 5 -w '%{http_code}' "$@" || true
+}
+
+http_ok() {
+    [[ "$(http_code "$1")" == 200 ]]
+}
+
+# A file the dashboard cell serves, or nothing.
+served() {
+    curl -fsS -m 5 "${dashboard_url}/$1" 2>/dev/null
+}
+
+# The status in the asset cell's answer, as the page reads it.
+served_status_is() {
+    local answer
+    answer="$(served status/0.json)" || return 1
+    [[ "$(json "$answer" 'b["body"]["status"]')" == "$1" ]]
+}
+
+# The newest incident's severity in the risk monitor's answer.
+served_incident_is() {
+    local answer
+    answer="$(served incidents/0.json)" || return 1
+    [[ "$(json "$answer" 'b["body"]["incidents"][0]["severity"] if b["body"]["incidents"] else None')" == "$1" ]]
+}
+
+page_offers_controls() {
+    local config
+    config="$(served config.json)" || return 1
+    [[ "$(json "$config" 'b["dev_controls"]')" == true ]]
+}
+
+# Sends `simulate_scenario` to the sensor the way the page's buttons do: a
+# GET on the API path opens a session, whose id a POST must present, with the
+# payload as base64. Prints the HTTP status of the POST.
+gateway_simulate() {
+    local preset="$1" stream="${XDG_DATA_HOME}/gateway-stream" session payload reader
+    curl -sS -N -m 20 "${dashboard_url}/api" > "$stream" 2>/dev/null &
+    reader=$!
+    wait_for 10 "a gateway session" grep -q '"session"' "$stream" || true
+    session="$(sed -n 's/.*"session":"\([^"]*\)".*/\1/p' "$stream" | head -n 1)"
+    payload="$(printf '{"v":1,"body":{"preset":"%s"}}' "$preset" | base64 -w0)"
+    http_code -X POST "${dashboard_url}/api" \
+        -H 'Content-Type: application/json' -H "X-Gateway-Session: ${session}" \
+        -d "{\"type\":\"command\",\"sri\":\"$(sensor)\",\"name\":\"simulate_scenario\",\"payload\":\"${payload}\"}"
+    kill "$reader" 2>/dev/null || true
+    wait "$reader" 2>/dev/null || true
 }
 
 # ---------------------------------------------------------------------------
@@ -423,13 +501,95 @@ scenario_restart() {
     assert_log_count "critical alerts (whole scenario)" 1 "ALERT severity=critical"
 }
 
+# The web dashboard: the gateway serves the page and the cells' answers
+# beside it; the page's scenario buttons work only with dev_controls.
+scenario_dashboard() {
+    deploy_cells
+    step "fetching ${dashboard_url}/"
+    if wait_for 20 "the dashboard route" http_ok "${dashboard_url}/"; then
+        say "ok   [$scenario] the dashboard route responds"
+    else
+        fail "GET ${dashboard_url}/ answered $(http_code "${dashboard_url}/"), not 200"
+        return
+    fi
+    assert_eq "the route serves the page" 1 "$(served "" | grep -c '<title>ChillGuard</title>' || true)"
+    wait_for 15 "the asset cell's answer" http_ok "${dashboard_url}/status/0.json" || true
+    wait_for 15 "the risk monitor's answer" http_ok "${dashboard_url}/incidents/0.json" || true
+    local answer
+    answer="$(served status/0.json)" || { fail "status/0.json is not served"; return; }
+    assert_eq "served status is this refrigerator's" "$fridge" "$(json "$answer" 'b["body"]["refrigerator_id"]')"
+    assert_eq "served status" normal "$(json "$answer" 'b["body"]["status"]')"
+    answer="$(served incidents/0.json)" || { fail "incidents/0.json is not served"; return; }
+    assert_eq "served incidents" 0 "$(json "$answer" 'len(b["body"]["incidents"])')"
+    assert_eq "an unknown path" 404 "$(http_code "${dashboard_url}/status/1.json")"
+    # Without dev_controls there is no way from HTTP into the swarm.
+    assert_eq "message API without dev_controls" 404 "$(http_code "${dashboard_url}/api")"
+
+    step "redeploying the dashboard cell with dev_controls"
+    dashboard_config true
+    quiet scripts/deploy.sh dashboard-cell || { fail "deploy failed (see the error above)"; return; }
+    wait_for 20 "the page to offer the controls" page_offers_controls || fail "config.json does not say dev_controls"
+    step "starting short_door_open through the gateway's message API"
+    assert_eq "simulate_scenario accepted by the gateway" 202 "$(gateway_simulate short_door_open)"
+    if wait_for 30 "the served status to reach critical" served_status_is critical; then
+        say "ok   [$scenario] the served status reached critical"
+    else
+        fail "the served status did not reach critical within 30s"
+    fi
+    assert_log_count "scenario started by the page's command" 1 "scenario started refrigerator_id=${fridge} preset=short_door_open"
+    # The two answers are stored one after the other; give the second a moment.
+    wait_for 5 "the served incident to reach critical" served_incident_is critical || true
+    answer="$(served incidents/0.json)" || { fail "incidents/0.json is not served"; return; }
+    assert_eq "served incidents during the excursion" 1 "$(json "$answer" 'len(b["body"]["incidents"])')"
+    assert_eq "served incident severity" critical "$(json "$answer" 'b["body"]["incidents"][0]["severity"]')"
+    assert_eq "served incident is open" true "$(json "$answer" 'b["body"]["incidents"][0]["recovered_at"] is None')"
+    assert_eq "served exposure at least critical_after" true \
+        "$(json "$answer" "b[\"body\"][\"incidents\"][0][\"exposure\"] >= $critical_after_ms")"
+    assert_log_count "answers the dashboard refused" 0 "answer ignored"
+}
+
+# `chillguard start` and `stop`: the playground, which is a runtime of its
+# own beside this run's, under a name and on ports of this run.
+scenario_playground() {
+    # Nothing is deployed under this prefix; the teardown expects one.
+    export SRN_PREFIX="${run_id}-${scenario}-"
+    local name="play-${run_id}" page="http://127.0.0.1:$(( 40000 + $$ % 10000 ))/chillguard"
+    local -a start=("$chillguard" --json start --no-open --name "$name"
+        --port "$(( 40000 + $$ % 10000 ))" --swarm-port "$(( 50000 + $$ % 10000 ))")
+    local started snapshot
+
+    step "chillguard start"
+    playground="$name"
+    started="$("${start[@]}" 2>/dev/null)" || { fail "chillguard start failed: $("${start[@]}" 2>&1 | tail -n 1)"; return; }
+    assert_eq "start started the playground" false "$(json "$started" 'b["already_running"]')"
+    assert_eq "start names the dashboard" "http://localhost:$(( 40000 + $$ % 10000 ))/chillguard/" "$(json "$started" 'b["url"]')"
+    # start returns once the page shows the refrigerator: no waiting here.
+    assert_eq "the dashboard responds" 200 "$(http_code "${page}/")"
+    assert_eq "the dashboard shows the refrigerator" 200 "$(http_code "${page}/status/0.json")"
+    assert_eq "the dashboard offers the scenarios" true "$(json "$(curl -fsS -m 5 "${page}/config.json")" 'b["dev_controls"]')"
+    # The endpoint start prints is how the rest of the CLI reaches it.
+    snapshot="$("$chillguard" --json --connect "$(json "$started" 'b["connect"]')" status)" || { fail "no status from the playground"; return; }
+    assert_eq "status through the endpoint start printed" normal "$(json "$snapshot" 'b["snapshot"]["status"]')"
+
+    step "chillguard start again"
+    started="$("${start[@]}" 2>/dev/null)" || { fail "a second chillguard start failed"; return; }
+    assert_eq "the second start found it running" true "$(json "$started" 'b["already_running"]')"
+    assert_eq "the dashboard still responds" 200 "$(http_code "${page}/")"
+
+    step "chillguard stop"
+    assert_eq "stop stopped it" true "$(json "$("$chillguard" --json stop --name "$name")" 'b["was_running"]')"
+    playground=""
+    assert_eq "the dashboard is gone" 000 "$(http_code "${page}/")"
+    assert_eq "a second stop finds nothing" false "$(json "$("$chillguard" --json stop --name "$name")" 'b["was_running"]')"
+}
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
 scenarios=("$@")
 if [[ ${#scenarios[@]} -eq 0 ]]; then
-    scenarios=(normal excursion stale restart)
+    scenarios=(normal excursion stale restart dashboard playground)
 fi
 for s in "${scenarios[@]}"; do
     declare -F "scenario_$s" >/dev/null || { echo "unknown scenario: $s" >&2; exit 2; }

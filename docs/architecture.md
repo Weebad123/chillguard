@@ -196,7 +196,7 @@ that satisfy it, and lists what is still open.
 
 ### Next Phase after the MVP
 - [ ] Second refrigerator and second Myrmic node.
-- [ ] Web dashboard.
+- [x] Web dashboard (docs/decisions/0006-web-dashboard.md).
 - [ ] Physical temperature sensor integration.
 - [ ] Notifications through an external service.
 - [ ] More advanced persistence and failure recovery.

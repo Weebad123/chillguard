@@ -2,7 +2,8 @@
 # Wasm binaries land. Sourced, not executed.
 
 # Keep in sync with CELLS in the Makefile.
-CELLS=(sensor-cell fridge-asset-cell risk-monitor-cell)
+# The dashboard comes last: it asks the other cells.
+CELLS=(sensor-cell fridge-asset-cell risk-monitor-cell dashboard-cell)
 
 # Print the path of the Wasm binary `myrmic build` produces for a cell crate.
 wasm_path() {
@@ -16,11 +17,13 @@ wasm_path() {
 # in init). A cell is built from its own crate, chillguard-core and
 # chillguard-protocol; other cells and the operator CLI are not part of it,
 # and neither are test-only sources (`tests/` directories, `tests.rs`
-# modules), or cargo's correct "nothing to do" would be refused here.
+# modules), or cargo's correct "nothing to do" would be refused here. The
+# dashboard cell's page is compiled into its binary and counts as a source.
 #
 # Usage: stale_source <cell> <wasm path>
 stale_source() {
     find "crates/cells/$1" crates/chillguard-core crates/chillguard-protocol \
-        -name '*.rs' -not -path '*/tests/*' -not -name tests.rs \
+        \( -name '*.rs' -o -path '*/assets/*' \) \
+        -not -path '*/tests/*' -not -name tests.rs \
         -newer "$2" -print -quit
 }

@@ -7,6 +7,8 @@ runtime's telemetry. Everything here was run against Myrmic 0.7.0 on
 differ, this says so.
 
 Contents: [the operator CLI](#the-operator-cli) ·
+[the playground](#the-playground) ·
+[the web dashboard](#the-web-dashboard) ·
 [what is running](#what-is-running) · [logs](#logs) ·
 [log fields](#log-fields) · [traces](#traces) · [metrics](#metrics) ·
 [live stream](#live-stream) · [retention and verbosity](#retention-and-verbosity) ·
@@ -31,6 +33,8 @@ chillguard set-limits --upper 10 --critical-after 30m
 chillguard simulate short_door_open       # dev mode only; also normal_day, power_failure_2h
 chillguard watch                          # status changes, alerts, recoveries as they happen
 chillguard watch --readings --for 5m      # plus every reading, for five minutes
+chillguard start                          # a playground on this machine, with the web dashboard
+chillguard stop                           # stop the playground
 ```
 
 Options that work with every command:
@@ -65,6 +69,8 @@ What each command does beyond sending a message:
   `scenario started` or `simulate_scenario rejected`.
 - **`watch`** shows the events of the refrigerator behind `--prefix` only,
   although events of every refrigerator travel the same network.
+- **`start`** and **`stop`** do not talk to a deployment; they make and
+  remove one, for trying ChillGuard out. See [the playground](#the-playground).
 
 Example, a door left open with the test configuration (`config/e2e/`):
 
@@ -91,6 +97,109 @@ during the incident, in which case the exposure includes time nobody
 measured (docs/decisions/0003-risk-policies.md, policy 6). A recovered
 incident is an observation. It does not say the contents are safe.
 
+## The playground
+
+`chillguard start` puts a complete ChillGuard on this machine for as long
+as you want to look at it, and `chillguard stop` removes it. The guide for
+someone using it is [docs/playground/README.md](playground/README.md); this
+is what it does, for whoever has to explain it.
+
+1. Finds the built cells (`--cells`, else `target/wasm32-unknown-unknown/release`
+   beside the program or under the current directory) and refuses to go on
+   without all four.
+2. Asks `myrmic runtimes <name> info` whether the playground's runtime
+   (`chillguard-play`, or `--name`) is running. If not: checks that the
+   dashboard's port (`--port`, 8642) and the runtime's loopback port
+   (`--swarm-port`, 20124) are free, writes a runtime configuration with
+   multicast off, a loopback listener and an embedded gateway, and starts it
+   with `myrmic runtimes start <file> --name <name> --tmp --detached`.
+3. Waits until `myrmic --connect tcp/127.0.0.1:<swarm port> network --once`
+   lists the runtime by name.
+4. Deploys `sensor-cell`, `fridge-asset-cell`, `risk-monitor-cell` and
+   `dashboard-cell`, without a prefix, each with its `config/<cell>.dev.json`
+   as compiled into the program. A cell that is already deployed is left
+   alone.
+5. Waits until the gateway serves `/chillguard/` and
+   `/chillguard/status/0.json`, which is there once the asset cell has
+   answered the dashboard cell.
+6. Prints the address and the endpoint, and opens the address with
+   `xdg-open` unless `--no-open` was given.
+
+A `start` that fails after step 2 stops the runtime it started. A `start`
+while the playground runs does steps 3 to 6 again, which is also how cells
+that went missing are put back (below).
+
+Where things are:
+
+| What | Where |
+|---|---|
+| The runtime's configuration and the two ports | `$XDG_DATA_HOME/chillguard/playground/<name>/` (`~/.local/share/...` without the variable); removed by `stop` |
+| The runtime's log | `myrmic runtimes chillguard-play logs` |
+| The cells' state, the incidents | In the runtime's memory (`--tmp`). Gone with `stop`, a reboot, or a kill. |
+| The other commands' way in | `export MYRMIC_CONNECT=tcp/127.0.0.1:20124`, no `--prefix` |
+
+Things that were observed:
+
+- **A computer that sleeps loses the cells, not the runtime.** After the
+  machine had been suspended for an hour the runtime logged
+  `hygiene: cleaning up after dead cell(s) cells=4` and
+  `fencing: killing cell ... why=SelfSuperseded`, and the page answered
+  `404 myrmic gateway: no application is mounted at this path`. The runtime
+  itself kept running, with its memory. `chillguard start` then found it,
+  deployed the four cells again, and they resumed from their state
+  (`resumed=true`, the earlier incident still listed).
+- **A taken port is not reported by the runtime.** A runtime whose gateway
+  port is in use starts, logs nothing about it and serves nothing, which is
+  why `start` checks both ports first.
+- **The dashboard's port is open to the network** (docs/security.md, "the
+  gateway"), and the playground has the page's scenario buttons on, so
+  anyone who can reach the port can send commands to the playground's
+  cells. They are a simulated refrigerator in a runtime that no other
+  runtime can join; that is the whole of what is exposed.
+
+## The web dashboard
+
+`dashboard-cell` puts one page at `/chillguard/` on the swarm's gateways.
+The runtime started from `config/runtime.dashboard.yml` embeds a gateway on
+port 8080, so the page is at `http://<host>:8080/chillguard/`, for a phone
+on the same network too. Set up and security: README, "Dashboard", and
+docs/security.md, "the gateway".
+
+| On the page | Where it comes from |
+|---|---|
+| A card per refrigerator: temperature, status, range, how long before the snapshot the reading was taken | The asset cell's answer to `get_status`, as `chillguard status` shows it. The status is the asset's view. |
+| Exposure and active alert on the card | The open incident in the risk monitor's answer to `get_incidents`: its exposure so far, severity, start, temperature range, whether it was acknowledged. |
+| Incident history | The same answer: the newest 20 incidents of each refrigerator, newest first. |
+| Development controls | Only when the cell was deployed with `dev_controls: true` (`PROFILE=dev`). A button sends `simulate_scenario` to that refrigerator's sensor cell through the gateway, as `chillguard simulate <preset>` does through the Myrmic CLI. |
+
+The dashboard cell asks both cells every `refresh_ms` and stores each answer
+as a file beside the page (`status/<n>.json`, `incidents/<n>.json`, `<n>`
+counting the refrigerators of its init payload from 0; `config.json` says
+how many there are). The page fetches those files at the same pace, and
+pauses while its tab is in the background. They are the wire messages of
+docs/decisions/0004-wire-contract.md, so `curl` shows what the page sees:
+
+```sh
+curl -s http://localhost:8080/chillguard/status/0.json
+curl -s http://localhost:8080/chillguard/incidents/0.json
+```
+
+What the page says when something is wrong:
+
+| On the page | Meaning | Look at |
+|---|---|---|
+| `Not updating: ...` beside the title | The page cannot fetch from the gateway: the runtime is down, or the dashboard cell is not deployed (`config.json` is a 404). What is shown is what was last fetched. | `myrmic runtimes list`, `myrmic cells status`; `make deploy`. |
+| A card with `No answer` and no values | The asset cell has left three refreshes unanswered, and the dashboard cell has removed its last snapshot rather than leave it looking current. Also shown until the first answer after a deploy, and when the dashboard's payload names a cell that does not exist. | `answer withdrawn` in the log names the cell; `myrmic cells status`; the names in `config/dashboard-cell.<profile>.json` against the `SRN_PREFIX` the cells were deployed with. |
+| `unknown: the risk monitor is not answering` for exposure and alert | The same for the risk monitor. The card's status still comes from the asset cell. | as above |
+| `No answer` with values and "This snapshot is ... old" | The file is there but old: the dashboard cell is deployed and no longer refreshing. | The dashboard cell's log; redeploy it (`scripts/deploy.sh dashboard-cell`). |
+| A scenario button answers `... was not sent: ... has no placement` | The sensor cell named in the dashboard's payload is not deployed. | as above |
+| A scenario button reports `Sent`, and nothing happens | The sensor refused: it was deployed without `dev_mode`. | `simulate_scenario rejected ... reason=dev_mode_off` in the log. |
+
+Each refresh makes the asset log `status sent ... via=command` and the
+monitor `incidents sent ... via=command`. A cell that is away is asked once,
+not once per refresh: the runtime keeps commands for a cell that is not
+deployed and delivers them all when it returns.
+
 ## What is running
 
 | Question | Command |
@@ -100,7 +209,8 @@ incident is an observation. It does not say the contents are safe.
 | Which nodes are on the network? | `myrmic network status` (also lists connected CLI clients, such as a running `chillguard watch`) |
 | Which cells are deployed, where, since when? | `myrmic cells status` |
 
-The cells of one refrigerator are the three names behind `--prefix`. After a
+The cells of one refrigerator are the three names behind `--prefix`; the
+dashboard cell is `<prefix>dashboard-cell`. After a
 runtime restart `myrmic cells status` is empty: a restart releases the cells
 and they must be deployed again (`make deploy`, with the same `PROFILE` and
 `SRN_PREFIX` as before); their state is kept (docs/myrmic-notes.md, section
@@ -167,6 +277,7 @@ written the way the wire writes them.
 | `observed_at` | When that reading was taken. `none` on a start line of a cell that has no reading yet. | ms since 1970, UTC |
 | `at` | When something that is not a reading happened: a status change taking effect, an acknowledgement. | ms since 1970, UTC |
 | `reason` | Why something was refused. | a short name, or quoted text |
+| `cell` | In the dashboard's lines: the asset or monitor cell the line is about. | SRI; `myrmic cells status` shows the name |
 
 The lines, by cell:
 
@@ -196,6 +307,11 @@ The lines, by cell:
 | monitor | INFO | `incident acknowledged refrigerator_id= incident_id= severity= at=` |
 | monitor | INFO | `incidents sent refrigerator_id= count= truncated= reply_to= via=` |
 | monitor | INFO | `tick armed refrigerator_id= period_ms=` |
+| dashboard | INFO | `dashboard-cell started id= mount= refrigerators= refresh_ms= dev_controls=` |
+| dashboard | WARN | `answer withdrawn cell= file= reason=no_answer refreshes=` |
+| dashboard | INFO | `answers resumed cell= file=` |
+| dashboard | WARN | `query repeated cell= command= reason=no_answer` (every 30 refreshes while a cell stays silent) |
+| dashboard | WARN | `answer ignored cell= kind= reason=`, `answer not stored cell= file= reason=`, `query not sent cell= command= reason=` |
 
 Every transition is logged at INFO and every alert at WARN. A cell logs at
 ERROR only when its deployment is refused (`init refused reason=`).
@@ -326,4 +442,6 @@ not been tried here.
 | `reading rejected ... reason=duplicate` | The same timestamp twice. Harmless once. | |
 | Alerts that open and close within seconds | Readings crossing a limit back and forth. | Raise the hysteresis: `chillguard set-limits --hysteresis 0.5`. |
 | The same `ERROR ... errored out while serving command` every 5 s | A command whose handler keeps failing is being retried. | Read the message; the cells drop commands they can never accept, so this points at storage or the runtime. |
+| The web page shows `No answer` or `Not updating` | See [the web dashboard](#the-web-dashboard). | |
+| The playground's page says `no application is mounted at this path` | The runtime runs and its cells are gone, typically after the computer slept. | `chillguard start` again; see [the playground](#the-playground). |
 | Readings of another site appear, or state changes by itself | Two deployments on one network share a refrigerator id or cell names. | Give each deployment its own `--prefix` and `refrigerator_id` (docs/myrmic-notes.md, sections 10 and 13). |

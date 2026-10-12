@@ -19,7 +19,7 @@ on:
   workflow_dispatch:
     inputs:
       e2e:
-        description: "Also run the end-to-end harness (about 5 minutes)"
+        description: "Also run the end-to-end harness (about 6 minutes)"
         type: boolean
         default: false
 
@@ -163,8 +163,8 @@ jobs:
           retention-days: 14
 
   e2e:
-    # The harness starts a Myrmic runtime on loopback and plays four
-    # scenarios against the real cells (scripts/e2e.sh). It takes about five
+    # The harness starts a Myrmic runtime on loopback and plays six
+    # scenarios against the real cells (scripts/e2e.sh). It takes about six
     # minutes and has only been run on developer machines so far, so it is
     # opt-in here: run the workflow by hand with the `e2e` input set.
     name: end-to-end (manual)

@@ -1,0 +1,9 @@
+---
+source: crates/chillguard-cli/tests/render.rs
+expression: "pretty(&render::stopped_json(\"chillguard-play\", true))"
+---
+{
+  "running": false,
+  "was_running": true,
+  "runtime": "chillguard-play"
+}

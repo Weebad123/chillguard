@@ -14,6 +14,7 @@ mod common;
 
 use std::time::Duration;
 
+use chillguard_cli::playground::Playground;
 use chillguard_cli::render::{self, AckOutcome, OpenIncident, StatusReport, WatchEvent};
 use chillguard_core::risk::{RefrigeratorConfig, Severity, Status};
 use chillguard_protocol::commands::ScenarioPreset;
@@ -188,6 +189,39 @@ fn simulate() {
     assert_snapshot!(
         "simulate_json",
         pretty(&render::simulate_json("site-a-sensor-cell", preset, 7))
+    );
+}
+
+// ---------------------------------------------------------------------------
+// start, stop
+// ---------------------------------------------------------------------------
+
+#[test]
+fn playground() {
+    let started = Playground {
+        runtime: "chillguard-play".to_string(),
+        url: "http://localhost:8642/chillguard/".to_string(),
+        connect: "tcp/127.0.0.1:20124".to_string(),
+        already_running: false,
+    };
+    assert_snapshot!("start", render::playground(&started));
+    assert_snapshot!("start_json", pretty(&render::playground_json(&started)));
+    // Found running, under a name of its own: the stop hint names it.
+    let found = Playground {
+        runtime: "demo-2".to_string(),
+        url: "http://localhost:9000/chillguard/".to_string(),
+        connect: "tcp/127.0.0.1:21000".to_string(),
+        already_running: true,
+    };
+    assert_snapshot!("start_again", render::playground(&found));
+    assert_snapshot!("stop", render::stopped("chillguard-play", true));
+    assert_snapshot!(
+        "stop_not_running",
+        render::stopped("chillguard-play", false)
+    );
+    assert_snapshot!(
+        "stop_json",
+        pretty(&render::stopped_json("chillguard-play", true))
     );
 }
 

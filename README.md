@@ -4,11 +4,17 @@ Cold-storage risk monitor on [Myrmic](https://book.myrmic.dev/). ChillGuard
 watches a refrigerator's temperature, measures how long it stays outside a
 configured safe range, raises a warning when it leaves the range and a
 critical alert when the excursion has lasted long enough, records the
-recovery, and keeps the incident history. Version 0.1.0 monitors one
-simulated refrigerator on one Myrmic node and is operated from a command
-line; see [CHANGELOG.md](CHANGELOG.md).
+recovery, and keeps the incident history. It monitors one simulated
+refrigerator on one Myrmic node and is operated from a command line, with a
+small web dashboard to look at; see [CHANGELOG.md](CHANGELOG.md).
 
 Built and tested against Myrmic 0.7.0 (developer preview), Linux x86_64.
+
+**Want to try it?** With the [prerequisites](#prerequisites) installed,
+`make start` builds everything, starts a simulated refrigerator on your
+machine and opens its dashboard in your browser; `make stop` ends it. The
+[playground guide](docs/playground/README.md) walks through what to press
+and what you will see.
 
 > **Safety disclaimer.** ChillGuard records temperature observations and
 > reports what it observed. It does not, and cannot, say that food, medicine
@@ -22,8 +28,9 @@ Built and tested against Myrmic 0.7.0 (developer preview), Linux x86_64.
 ## How it works
 
 Three Myrmic cells, each a small WebAssembly module, share the work of one
-refrigerator. The rules live in one plain Rust crate that the cells call;
-the cells only decode, call, persist and publish (docs/decisions/0001).
+refrigerator, and a fourth puts their state on a web page. The rules live in
+one plain Rust crate that the cells call; the cells only decode, call,
+persist and publish (docs/decisions/0001).
 
 ```mermaid
 flowchart LR
@@ -35,7 +42,15 @@ flowchart LR
         ASSET -- "reading_accepted (+ limits)" --> RISK
         RISK -- "status_changed" --> ASSET
         RISK -. "alert_raised<br/>incident_recovered" .-> OUT(( ))
+        DASH["dashboard-cell<br/>the page and the answers it shows"]
+        DASH -- "get_status" --> ASSET
+        DASH -- "get_incidents" --> RISK
+        GW["gateway (HTTP)"]
+        DASH -. "files" .-> GW
     end
+    BROWSER["browser or phone<br/>/chillguard/"]
+    GW -- "page, status, incidents" --> BROWSER
+    BROWSER -. "simulate_scenario (dev only)" .-> GW
     CLI["chillguard CLI<br/>status, incidents, ack,<br/>set-limits, simulate, watch"]
     CLI -- "get_status, set_limits" --> ASSET
     CLI -- "get_incidents, acknowledge" --> RISK
@@ -55,7 +70,14 @@ flowchart LR
   stores every incident in a table.
 - **chillguard** is a native CLI that reaches the cells through the Myrmic
   CLI. It shows status and incidents, acknowledges incidents, changes
-  limits and, in development deployments, drives the simulator.
+  limits and, in development deployments, drives the simulator. Its
+  `start` and `stop` run a throwaway playground with all of the above on
+  one machine.
+- **dashboard-cell** asks the asset cell and the risk monitor on a timer and
+  stores their answers as files beside one web page, which a Myrmic gateway
+  serves and the page polls. It owns no state and changes nothing; in
+  development deployments the page can also start the simulator's scenarios.
+  See [Dashboard](#dashboard).
 
 The state machine, how exposure is measured across gaps, what a restart
 does and every other edge are written down in
@@ -71,7 +93,7 @@ The full proposal, including the two-node picture that is not built yet, is
 | [rustup](https://rustup.rs/) | The workspace pins `nightly-2026-08-07` in `rust-toolchain.toml`; rustup installs it, with the Wasm target, on the first `cargo` command. | `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \| sh` |
 | A C toolchain | Build scripts of dependencies compile natively. | `sudo apt install build-essential` |
 | Myrmic CLI 0.7.0 | Builds the cells to Wasm, runs the runtime, deploys, and is the transport the operator CLI uses. Needs glibc 2.39 or newer (Ubuntu 24.04, Debian 13). | See below |
-| `python3`, `make` | The end-to-end harness reads JSON with Python; `make` drives everything. | usually present |
+| `python3`, `make`, `curl` | The end-to-end harness reads JSON with Python and fetches the dashboard with curl; `make` drives everything. | usually present |
 | `cargo-deny`, `cargo-llvm-cov` (optional) | Licence and advisory check, coverage gate. CI installs its own. | `cargo install cargo-deny cargo-llvm-cov` |
 
 Install the Myrmic CLI from the release package and verify it, as its
@@ -94,13 +116,33 @@ myrmic --version        # 0.7.0
 git clone https://github.com/Weebad123/chillguard.git
 cd chillguard
 make lint test          # clippy with warnings as errors, then the host tests (about 2 minutes cold)
-make build-cells        # the three cells, to target/wasm32-unknown-unknown/release/*.wasm
+make build-cells        # the four cells, to target/wasm32-unknown-unknown/release/*.wasm
 make cli                # the operator CLI, to target/debug/chillguard
 export PATH="$PWD/target/debug:$PATH"
 ```
 
 `make help` lists every target. `make ci` runs the same gates as the GitHub
 workflow, which needs `cargo-deny` and `cargo-llvm-cov` installed.
+
+## Try it: the playground
+
+```sh
+make start      # builds the cells and the CLI, then runs `chillguard start`
+make stop       # `chillguard stop`
+```
+
+`chillguard start` starts a Myrmic runtime of its own that keeps everything
+in memory and stays off the network, deploys the four cells with the `dev`
+payloads (a simulated refrigerator on a 60x clock), waits until the
+dashboard shows the refrigerator, prints its address,
+<http://localhost:8642/chillguard/>, and opens it in your browser. Press a
+scenario button on the page and watch a power failure play out in under
+three minutes. `chillguard stop` stops the runtime; nothing is kept.
+
+[docs/playground/README.md](docs/playground/README.md) is the guide: what
+the page shows, what to try and how long each thing takes, the same from
+the terminal, the options, and what to do when something goes wrong. The
+sections below are for running ChillGuard as a deployment instead.
 
 ## Run
 
@@ -146,6 +188,51 @@ the log lines, telemetry, and what to do when something looks wrong.
 [config/README.md](config/README.md) describes the runtime configuration
 and the deployment profiles. [docs/security.md](docs/security.md) says who
 can reach what and how to limit it.
+
+## Dashboard
+
+A single page with a card per refrigerator (temperature, status, exposure,
+active alert), the incident history and, in development deployments, buttons
+for the simulator's scenarios. It is plain HTML, CSS and JavaScript in one
+file with no build step and nothing loaded from elsewhere, and it lays
+itself out for a phone.
+
+The page is served by a Myrmic gateway. Start the runtime from the
+configuration that embeds one, then deploy as before:
+
+```sh
+myrmic runtimes start config/runtime.dashboard.yml --name chillguard --detached
+export MYRMIC_CONNECT=tcp/127.0.0.1:20123
+make deploy PROFILE=dev          # or plain `make deploy` for a view-only page
+```
+
+Open <http://localhost:8080/chillguard/>, or `http://<this host>:8080/chillguard/`
+from a phone on the same network. With `PROFILE=dev`, press
+**Power failure, 2 h** and watch the card go to `Warning` after about a
+minute and a half and `Critical` a minute later, with the exposure counting
+and the incident appearing in the table; it is the demo below, driven from
+the page.
+
+What to know before using it:
+
+- **The gateway listens on every network interface of the host** and has no
+  login. A view-only deployment (`prod`) shows readings and incidents to
+  whoever can reach port 8080 and accepts nothing. `PROFILE=dev` turns on
+  `dev_controls`, and with it the gateway accepts commands for *any* cell
+  over HTTP. Use `dev` on a machine or network you control;
+  [docs/security.md](docs/security.md#the-gateway) has the details and how
+  to tunnel instead.
+- **The page shows what the cells last answered.** The dashboard cell asks
+  every `refresh_ms` (2 s under `dev`, 30 s under `prod`). A card whose
+  cell has stopped answering says `No answer` instead of keeping its last
+  value, and the page says `Not updating` when it cannot reach the gateway.
+- **It is a view.** Acknowledging incidents and changing limits stay with
+  `chillguard`. Deleting the dashboard cell loses nothing.
+- **It costs disk space while it runs**: Myrmic's file store never deletes
+  content, and every refresh writes a new status snapshot
+  (see [Limitations](#limitations)). Leave the cell out with
+  `scripts/deploy.sh sensor-cell fridge-asset-cell risk-monitor-cell` if
+  nobody will look at the page.
 
 ## Demo: a power failure
 
@@ -202,8 +289,9 @@ command for the same information as one JSON document.
 `chillguard status` afterwards shows `status normal` and `incident none`
 again.
 
-Other presets: `short_door_open` (five minutes with the door open, a
-warning and a critical at these limits) and `normal_day`. Under the `prod`
+Other presets: `short_door_open` (five minutes with the door open: a
+warning that recovers after about twenty seconds, too short to turn critical
+at these limits) and `normal_day`. Under the `prod`
 profile `simulate` is refused and the sensor logs
 `simulate_scenario rejected ... reason=dev_mode_off`.
 
@@ -225,12 +313,12 @@ exposure includes the outage and `has_data_gap` is set. This is the
 
 | Command | What it runs | Time |
 |---|---|---|
-| `make test` | Host tests: 64 unit tests of the risk rules and the transition table, property tests, scenario tests for normal, warming, critical, recovery, sensor dropout and restart, the simulator, the wire contract (round trips, malformed input, golden files) and the CLI (arguments, rendering snapshots, a fake `myrmic`). | seconds |
+| `make test` | Host tests: 64 unit tests of the risk rules and the transition table, property tests, scenario tests for normal, warming, critical, recovery, sensor dropout and restart, the simulator, the wire contract (round trips, malformed input, golden files) and the CLI (arguments, rendering snapshots, queries and the playground's `start` and `stop` against a fake `myrmic`). | seconds |
 | `make lint`, `make fmt-check`, `make doc` | Clippy with warnings as errors under the workspace lint set (no `unwrap`, `expect`, `panic!`, indexing or `unsafe` outside tests and the handler exports), formatting, rustdoc. | 1 min cold |
 | `make build-cells` | Every cell to Wasm with `myrmic build`. The check that core and protocol stayed `no_std`. | 1 min cold |
 | `make deny` | cargo-deny: licences and RustSec advisories ([deny.toml](deny.toml)). | seconds |
 | `make coverage` | Every host test under cargo-llvm-cov; fails if `chillguard-core` is below 90 % of lines. It is at 100 %. | 2 min |
-| `make e2e` | `scripts/e2e.sh`: a throwaway loopback-only runtime, the three cells, four scenarios (normal, excursion, stale, restart) driven and checked through the operator CLI, with the cell logs as evidence. | 5 min |
+| `make e2e` | `scripts/e2e.sh`: a throwaway runtime with its swarm side on loopback, the four cells, six scenarios (normal, excursion, stale, restart, dashboard, playground) driven and checked through the operator CLI, with the cell logs as evidence. `dashboard` fetches the page and the served answers through the gateway and starts a scenario the way the page's buttons do; `playground` runs `chillguard start` and `stop` for real. | 6 min |
 
 [docs/acceptance.md](docs/acceptance.md) maps each acceptance criterion to
 the tests that cover it. The GitHub workflow
@@ -244,20 +332,22 @@ Cargo.toml                 workspace: one toolchain, one lint set, shared depend
 crates/
   chillguard-core/         the rules: risk state machine, asset state, simulator (no_std, no I/O, no clock)
   chillguard-protocol/     every message on the wire, with its validation and golden files
-  chillguard-cli/          the `chillguard` operator CLI
+  chillguard-cli/          the `chillguard` operator CLI, including `start` and `stop` (the playground)
   cells/
     sensor-cell/           Myrmic cell: readings on a timer, `simulate_scenario` in dev mode
     fridge-asset-cell/     Myrmic cell: limits, latest reading, status view, `get_status`, `set_limits`
     risk-monitor-cell/     Myrmic cell: evaluation, alerts, incident table, `get_incidents`, `acknowledge`
+    dashboard-cell/        Myrmic cell: the web page (assets/index.html) and the answers it shows, served by a gateway
 config/                    runtime configurations and the prod, dev and e2e deployment payloads
 scripts/                   deploy.sh, e2e.sh, cells.sh
 docs/
+  playground/README.md     try ChillGuard: `make start`, what to press, what you will see
   architecture.md          the proposal and the acceptance criteria
   acceptance.md            criteria mapped to code and tests
   security.md              threat model, validation, access limits, known gaps
   operations.md            the CLI, logs, telemetry, troubleshooting
   myrmic-notes.md          what was verified about Myrmic 0.7.0, with sources
-  decisions/               0001 core vs cells, 0002 toolchain, 0003 risk policies, 0004 wire contract, 0005 state ownership
+  decisions/               0001 core vs cells, 0002 toolchain, 0003 risk policies, 0004 wire contract, 0005 state ownership, 0006 web dashboard
 .github/workflows/ci.yml   the quality gates
 deny.toml                  licence and advisory policy
 ```
@@ -296,8 +386,21 @@ is known to be missing.
 
 - One refrigerator per deployment, one node. The second refrigerator and
   the second node of the architecture are not built.
-- No web dashboard and no notifications; the CLI and the logs are the
-  interface.
+- No notifications. The CLI, the dashboard and the logs are the interface,
+  and the dashboard only shows: it cannot acknowledge or change limits.
+- The dashboard has no login and its gateway listens on every interface;
+  with `dev_controls` the gateway accepts commands for any cell
+  ([docs/security.md](docs/security.md#the-gateway)).
+- The dashboard costs disk space for as long as its cell runs. Myrmic's blob
+  store never deletes content, so every status snapshot written for the page
+  stays on the node: about 0.8 KiB each, which is 2.3 MiB a day at the
+  `prod` refresh of 30 s and 35 MiB a day at the `dev` refresh of 2 s. (On
+  disk, over four minutes, the database grew by about 7.7 kB per refresh;
+  how much of that compaction gives back was not followed up.) The incident
+  list is only written when it changes.
+- A standalone `myrmic gateway` did not reach a runtime that has multicast
+  off; the dashboard needs the gateway embedded in the runtime
+  (`config/runtime.dashboard.yml`).
 - No physical sensor. The sensor cell plays a model.
 - No authentication inside the swarm. Anyone who can reach the runtime's
   network can publish readings, change limits or acknowledge incidents.

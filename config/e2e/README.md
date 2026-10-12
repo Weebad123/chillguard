@@ -12,6 +12,9 @@ compressed so the whole suite runs in a few minutes:
 | asset `stale_after` | 10 s | the monitor ticks every 5 s and declares the sensor stale after 10 s of silence |
 | asset `hysteresis_c` | 0.5 | noise of ±0.2 °C around a limit does not reopen an incident |
 
+| dashboard `refresh_ms` | 2000 | the page's files follow the cells by at most two seconds |
+| dashboard `dev_controls` | false | the gateway serves files only; the `dashboard` scenario redeploys the cell with `true` for the part that sends a command over HTTP |
+
 Readings keep real timestamps; only the thermal model runs fast.
 
 The files name the refrigerator `fridge-e2e`. The harness does not deploy
@@ -19,7 +22,14 @@ them as they are: it writes copies with a refrigerator id unique to the run
 (`fridge-e2e-<pid>`), because events travel the whole network and two runs
 sharing an id would feed each other's readings.
 
+`dashboard-cell.dev.json` names the other cells with the placeholder
+`E2E_PREFIX`; the harness writes a copy per scenario with that scenario's
+SRN prefix in its place.
+
 `runtime.yml` disables multicast scouting and listens on loopback only, so
 the test runtime is invisible to other runtimes on the machine or network
-and is driven with `--connect tcp/127.0.0.1:<port>`. The harness writes a
-copy with `E2E_PORT` replaced by a port derived from its process id.
+and is driven with `--connect tcp/127.0.0.1:<port>`. Its embedded gateway
+serves the dashboard; unlike the swarm side it listens on every interface,
+which is why `dev_controls` is off except where it is tested. The harness
+writes a copy with `E2E_PORT` and `E2E_GATEWAY_PORT` replaced by ports
+derived from its process id.

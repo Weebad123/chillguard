@@ -1,0 +1,7 @@
+{
+  "refrigerators": [
+    { "sensor": "E2E_PREFIXsensor-cell", "asset": "E2E_PREFIXfridge-asset-cell", "monitor": "E2E_PREFIXrisk-monitor-cell" }
+  ],
+  "refresh_ms": 2000,
+  "dev_controls": false
+}

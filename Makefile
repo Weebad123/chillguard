@@ -1,6 +1,6 @@
 # ChillGuard task runner. `make help` lists the targets.
 
-CELLS    := sensor-cell fridge-asset-cell risk-monitor-cell
+CELLS    := sensor-cell fridge-asset-cell risk-monitor-cell dashboard-cell
 CELL_DIR := crates/cells
 # Init payloads for `make deploy`: `prod` (default) or `dev` (60x clock,
 # `simulate` accepted). See config/README.md.
@@ -12,7 +12,7 @@ COV_MIN    := 90
 COV_IGNORE := (crates/(chillguard-protocol|chillguard-cli|cells)/|crates/chillguard-core/tests/|/tests\.rs$$)
 
 .DEFAULT_GOAL := help
-.PHONY: help fmt fmt-check lint test doc deny coverage build-cells cli deploy e2e ci
+.PHONY: help fmt fmt-check lint test doc deny coverage build-cells cli start stop deploy e2e ci
 
 help: ## List the targets
 	@grep -E '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  %-12s %s\n", $$1, $$2}'
@@ -52,10 +52,16 @@ build-cells: ## Build every cell to WebAssembly
 cli: ## Build the operator CLI (target/debug/chillguard)
 	cargo build -p chillguard-cli
 
+start: build-cells cli ## Build everything and open the playground: a throwaway runtime with the web dashboard (docs/playground)
+	target/debug/chillguard start
+
+stop: ## Stop the playground
+	target/debug/chillguard stop
+
 deploy: build-cells ## Build the cells and deploy them to a running runtime (PROFILE=prod|dev)
 	scripts/deploy.sh
 
-e2e: build-cells cli ## Run the end-to-end scenarios on a throwaway runtime (about 5 min)
+e2e: build-cells cli ## Run the end-to-end scenarios on a throwaway runtime (about 6 min)
 	scripts/e2e.sh
 
 ci: fmt-check lint test doc deny coverage build-cells ## Run every quality gate (what .github/workflows/ci.yml runs)

@@ -1,0 +1,21 @@
+[package]
+name = "dashboard-cell"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+# The page is baked into the binary with `include_bytes!`, and a cell's memory
+# is a fixed budget: the defaults (32 KiB heap, 128 KiB memory) do not hold
+# the page and a decoded incident list. See docs/myrmic-notes.md, section 16.
+[package.metadata.myrmic]
+heap_size = 65_536
+initial_memory = 262_144
+max_memory = 262_144
+
+[dependencies]
+chillguard-protocol = { workspace = true }
+myrmic-sdk = { workspace = true }
+serde = { workspace = true }
+
+[lints]
+workspace = true
